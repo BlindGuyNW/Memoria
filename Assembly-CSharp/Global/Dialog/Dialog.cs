@@ -1,9 +1,11 @@
 ﻿using Assets.Sources.Scripts.UI.Common;
 using Memoria;
 using Memoria.Assets;
+using Memoria.ScreenReader;
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
 using UnityEngine;
 
 [RequireComponent(typeof(UIPanel))]
@@ -162,6 +164,10 @@ public class Dialog : MonoBehaviour
         this.SetCurrentChoice(this.defaultChoice);
         yield return new WaitForEndOfFrame();
         this.isChoiceReady = true;
+
+        // Announce choices for screen readers
+        AnnounceChoicesForScreenReader();
+
         yield break;
     }
 
@@ -194,7 +200,12 @@ public class Dialog : MonoBehaviour
         choiceIndexAbsolute = Mathf.Clamp(choiceIndexAbsolute, 0, this.maskChoiceList.Count - 1);
         Int32 choiceIndexUnmasked = this.choiceList.IndexOf(this.maskChoiceList[choiceIndexAbsolute]);
         if (selectChoice != choiceIndexUnmasked)
+        {
             this.SetCurrentChoice(choiceIndexUnmasked);
+
+            // Announce the new choice for screen readers
+            AnnounceCurrentChoiceForScreenReader();
+        }
     }
 
     public void SetupChooseMask(Int32 mask, Int32 choiceExactNumber)
@@ -636,6 +647,10 @@ public class Dialog : MonoBehaviour
         {
             this.CurrentParser.AdvanceProgressToMax();
             this.currentState = Dialog.State.CompleteAnimation;
+
+            // Announce dialog text immediately for screen readers if no typewriter effect
+            AnnounceDialogForScreenReader();
+
             if (base.gameObject.activeInHierarchy && this.endMode > 0)
             {
                 if (this.AutoHideCoroutine != null)
@@ -658,6 +673,10 @@ public class Dialog : MonoBehaviour
             return;
         this.currentState = Dialog.State.CompleteAnimation;
         UIDebugMarker.DebugLog($"AfterSentenseShown Id:{this.Id} Animation State:{this.currentState}");
+
+        // Announce dialog text for screen readers
+        AnnounceDialogForScreenReader();
+
         if (this.endMode > 0 && base.gameObject.activeInHierarchy)
         {
             if (this.AutoHideCoroutine != null)
@@ -811,6 +830,9 @@ public class Dialog : MonoBehaviour
                 ETb.SndMove();
             else
                 this.isMuteSelectSound = false;
+
+            // Announce the selected choice for screen readers
+            AnnounceCurrentChoiceForScreenReader();
         }
     }
 
@@ -1640,6 +1662,127 @@ public class Dialog : MonoBehaviour
                 }
             }
         }
+    }
+
+    // Screen Reader Support
+    private void AnnounceDialogForScreenReader()
+    {
+        if (this.IsOverlayDialog)
+            return; // Don't announce overlay dialogs
+
+        try
+        {
+            String textToAnnounce = GetCleanDialogText();
+            if (!String.IsNullOrEmpty(textToAnnounce))
+            {
+                // Build announcement with character name if present
+                String announcement = String.Empty;
+                if (!String.IsNullOrEmpty(this.caption))
+                    announcement = this.caption + ": ";
+                announcement += textToAnnounce;
+
+                ScreenReaderManager.Instance.Speak(announcement, interrupt: true);
+            }
+        }
+        catch (Exception e)
+        {
+            // Silently fail to avoid breaking game if screen reader isn't available
+            SoundLib.VALog($"Screen reader announcement failed: {e.Message}");
+        }
+    }
+
+    private String GetCleanDialogText()
+    {
+        if (this.CurrentParser == null || String.IsNullOrEmpty(this.CurrentParser.ParsedText))
+            return String.Empty;
+
+        String text = this.CurrentParser.ParsedText;
+
+        // Remove FFIX formatting tags like [XXXX], {XXXX}, and other special markers
+        text = Regex.Replace(text, @"\[.*?\]", String.Empty); // Remove [TAG] style tags
+        text = Regex.Replace(text, @"\{.*?\}", String.Empty); // Remove {TAG} style tags
+
+        // Clean up multiple spaces and newlines
+        text = Regex.Replace(text, @"\s+", " ");
+        text = text.Trim();
+
+        return text;
+    }
+
+    private void AnnounceChoicesForScreenReader()
+    {
+        if (!this.HasChoices)
+            return;
+
+        try
+        {
+            String[] choices = this.ChoicePhrases;
+            if (choices == null || choices.Length <= 1)
+                return;
+
+            // Announce that choices are available and the current selection
+            String announcement = "Choose option. ";
+            Int32 currentChoice = this.SelectChoice;
+
+            // Get all choice text (skip the first element if it contains dialog text)
+            List<String> choiceTexts = new List<String>();
+            for (Int32 i = this.startChoiceRow; i < this.EndChoiceRow; i++)
+            {
+                Int32 choiceIndex = i - this.startChoiceRow;
+                if (!this.disableIndexes.Contains(choiceIndex) && i < choices.Length)
+                {
+                    String choiceText = StripFormattingTags(choices[i]);
+                    if (!String.IsNullOrEmpty(choiceText))
+                        choiceTexts.Add(choiceText);
+                }
+            }
+
+            if (choiceTexts.Count > 0 && currentChoice >= 0 && currentChoice < choiceTexts.Count)
+                announcement += choiceTexts[currentChoice];
+
+            ScreenReaderManager.Instance.Speak(announcement, interrupt: true);
+        }
+        catch (Exception e)
+        {
+            SoundLib.VALog($"Screen reader choice announcement failed: {e.Message}");
+        }
+    }
+
+    private void AnnounceCurrentChoiceForScreenReader()
+    {
+        if (!this.HasChoices)
+            return;
+
+        try
+        {
+            String[] choices = this.ChoicePhrases;
+            Int32 currentChoice = this.SelectChoice + this.startChoiceRow;
+
+            if (choices != null && currentChoice >= 0 && currentChoice < choices.Length)
+            {
+                String choiceText = StripFormattingTags(choices[currentChoice]);
+                if (!String.IsNullOrEmpty(choiceText))
+                    ScreenReaderManager.Instance.Speak(choiceText, interrupt: true);
+            }
+        }
+        catch (Exception e)
+        {
+            SoundLib.VALog($"Screen reader choice selection failed: {e.Message}");
+        }
+    }
+
+    private String StripFormattingTags(String text)
+    {
+        if (String.IsNullOrEmpty(text))
+            return String.Empty;
+
+        // Remove FFIX formatting tags
+        text = Regex.Replace(text, @"\[.*?\]", String.Empty);
+        text = Regex.Replace(text, @"\{.*?\}", String.Empty);
+        text = Regex.Replace(text, @"\s+", " ");
+        text = text.Trim();
+
+        return text;
     }
 
     public GameObject DialogChoicePrefab;
