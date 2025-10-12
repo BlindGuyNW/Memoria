@@ -1,6 +1,9 @@
 ﻿using System;
 using UnityEngine;
 using Assets.Sources.Scripts.UI.Common;
+using Memoria.Assets;
+using Memoria.Prime;
+using Memoria.ScreenReader;
 
 public class QuitUI : MonoBehaviour
 {
@@ -58,6 +61,68 @@ public class QuitUI : MonoBehaviour
         previousVibRight = vib.CurrentVibrateRight;
         vib.VIB_actuatorReset(0);
         vib.VIB_actuatorReset(1);
+
+        // Announce dialog prompt for screen readers
+        AnnounceDialogPrompt();
+    }
+
+    private void AnnounceDialogPrompt()
+    {
+        try
+        {
+            // Dialog structure: WarningDialog -> GetChild(0) contains multiple text labels
+            // Child[0] = main question, Child[1] = warning message, Child[2]/[3] = Yes/No
+            GameObject container = WarningDialog.GetChild(0);
+            if (container != null && container.transform.childCount > 1)
+            {
+                String fullMessage = "";
+
+                // Read Child[0] (main question)
+                GameObject questionChild = container.GetChild(0);
+                UILabel questionLabel = questionChild?.GetComponent<UILabel>();
+                if (questionLabel != null)
+                {
+                    UILocalize localize = questionChild.GetComponent<UILocalize>();
+                    if (localize != null && !String.IsNullOrEmpty(localize.key))
+                        fullMessage = Localization.GetWithDefault(localize.key);
+                    else
+                        fullMessage = questionLabel.Parser.ParsedText;
+                }
+
+                // Read Child[1] (warning/additional message) and append it
+                if (container.transform.childCount > 1)
+                {
+                    GameObject warningChild = container.GetChild(1);
+                    UILabel warningLabel = warningChild?.GetComponent<UILabel>();
+                    if (warningLabel != null)
+                    {
+                        UILocalize localize = warningChild.GetComponent<UILocalize>();
+                        String warningText;
+                        if (localize != null && !String.IsNullOrEmpty(localize.key))
+                            warningText = Localization.GetWithDefault(localize.key);
+                        else
+                            warningText = warningLabel.Parser.ParsedText;
+
+                        if (!String.IsNullOrEmpty(warningText))
+                        {
+                            if (!String.IsNullOrEmpty(fullMessage))
+                                fullMessage += " " + warningText;
+                            else
+                                fullMessage = warningText;
+                        }
+                    }
+                }
+
+                if (!String.IsNullOrEmpty(fullMessage))
+                {
+                    ScreenReaderManager.Instance.Speak(fullMessage, true);
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            Log.Error("Failed to announce quit dialog prompt: " + e.Message);
+        }
     }
 
     public void Hide()

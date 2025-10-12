@@ -80,6 +80,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Memoria.SteamFix", "Memoria
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Memoria.XInputDotNetPure", "Memoria.XInputDotNetPure\Memoria.XInputDotNetPure.csproj", "{952700CD-A384-43A4-AC4B-52256F83836E}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Memoria.ScreenReader", "Memoria.ScreenReader\Memoria.ScreenReader.csproj", "{F7A8C2E1-9D4B-4A1E-B8F9-3C5D6E7F8A9B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -240,6 +242,18 @@ Global
 		{952700CD-A384-43A4-AC4B-52256F83836E}.Release|x64.Build.0 = Release|Any CPU
 		{952700CD-A384-43A4-AC4B-52256F83836E}.Release|x86.ActiveCfg = Release|Any CPU
 		{952700CD-A384-43A4-AC4B-52256F83836E}.Release|x86.Build.0 = Release|Any CPU
+		{F7A8C2E1-9D4B-4A1E-B8F9-3C5D6E7F8A9B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F7A8C2E1-9D4B-4A1E-B8F9-3C5D6E7F8A9B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F7A8C2E1-9D4B-4A1E-B8F9-3C5D6E7F8A9B}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{F7A8C2E1-9D4B-4A1E-B8F9-3C5D6E7F8A9B}.Debug|x64.Build.0 = Debug|Any CPU
+		{F7A8C2E1-9D4B-4A1E-B8F9-3C5D6E7F8A9B}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{F7A8C2E1-9D4B-4A1E-B8F9-3C5D6E7F8A9B}.Debug|x86.Build.0 = Debug|Any CPU
+		{F7A8C2E1-9D4B-4A1E-B8F9-3C5D6E7F8A9B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F7A8C2E1-9D4B-4A1E-B8F9-3C5D6E7F8A9B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F7A8C2E1-9D4B-4A1E-B8F9-3C5D6E7F8A9B}.Release|x64.ActiveCfg = Release|Any CPU
+		{F7A8C2E1-9D4B-4A1E-B8F9-3C5D6E7F8A9B}.Release|x64.Build.0 = Release|Any CPU
+		{F7A8C2E1-9D4B-4A1E-B8F9-3C5D6E7F8A9B}.Release|x86.ActiveCfg = Release|Any CPU
+		{F7A8C2E1-9D4B-4A1E-B8F9-3C5D6E7F8A9B}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

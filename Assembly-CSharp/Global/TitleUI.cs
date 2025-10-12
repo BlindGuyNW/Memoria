@@ -4,6 +4,7 @@ using Memoria;
 using Memoria.Assets;
 using Memoria.Prime;
 using Memoria.Scenes;
+using Memoria.ScreenReader;
 using Memoria.Scripts;
 using Memoria.Speedrun;
 using System;
@@ -616,6 +617,37 @@ public class TitleUI : UIScene
             this.timer.Reset();
         }
         return true;
+    }
+
+    protected override String GetButtonText(GameObject go)
+    {
+        // Title menu buttons are image sprites without text labels
+        // Provide screen reader text for these buttons
+        if (go == this.continueButton)
+            return "Continue";
+        else if (go == this.newGameButton)
+            return "New Game";
+        else if (go == this.loadGameButton)
+            return "Load Game";
+        else if (go == this.cloudButton)
+            return "Cloud Save";
+        else if (go == this.MenuStaffButton || go == this.MenuStaffPCButton)
+            return "Staff Credits";
+        else if (go == this.MenuMovieButton)
+            return "Movie Gallery";
+        else if (go == this.MenuBlackjackButton || go == this.MenuBlackjackPCButton)
+            return "Blackjack";
+        else if (go == this.AchievementButton)
+            return "Achievements";
+        else if (go == this.ScreenRotateButton)
+            return "Screen Rotation";
+        else if (go == this.FaqsButton)
+            return "FAQs";
+        else if (go == this.SquareEnixButton)
+            return "Square Enix";
+
+        // Fall back to base implementation for buttons with UILabel components
+        return base.GetButtonText(go);
     }
 
     public override Boolean OnKeyRightBumper(GameObject go)
@@ -1376,8 +1408,33 @@ public class TitleUI : UIScene
             Log.Error(e);
         }
 
+        // Initialize screen reader support
+        try
+        {
+            ScreenReaderManager.Instance.Initialize();
+        }
+        catch (Exception e)
+        {
+            Log.Error("Failed to initialize screen reader support");
+            Log.Error(e);
+        }
+
         SiliconStudio.Social.InitializeSocialPlatform();
         PersistenSingleton<UIManager>.Instance.WorldHUDScene.EnableContinentTitle(false);
+    }
+
+    private void OnDestroy()
+    {
+        // Shutdown screen reader support
+        try
+        {
+            ScreenReaderManager.Instance.Shutdown();
+        }
+        catch (Exception e)
+        {
+            Log.Error("Failed to shutdown screen reader support");
+            Log.Error(e);
+        }
     }
 
     private void Awake()
@@ -1528,6 +1585,7 @@ public class TitleUI : UIScene
         ScriptsLoader.InitializeAsync();
         QualitySettings.antiAliasing = Configuration.Graphics.AntiAliasing;
     }
+
 
     private class SlideShow
     {

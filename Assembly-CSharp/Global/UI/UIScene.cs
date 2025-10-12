@@ -1,6 +1,9 @@
 ﻿using Assets.Scripts.Common;
 using Assets.Sources.Scripts.UI.Common;
 using Memoria;
+using Memoria.Assets;
+using Memoria.Prime;
+using Memoria.ScreenReader;
 using Memoria.Scenes;
 using System;
 using UnityEngine;
@@ -214,7 +217,13 @@ public class UIScene : MonoBehaviour
 
     public virtual Boolean OnItemSelect(GameObject go)
     {
-        return !this.isLoading && go != PersistenSingleton<UIManager>.Instance.gameObject;
+        if (!this.isLoading && go != PersistenSingleton<UIManager>.Instance.gameObject)
+        {
+            // Announce button text for screen readers
+            AnnounceButtonForScreenReader(go);
+            return true;
+        }
+        return false;
     }
 
     public virtual void onPress(GameObject go, Boolean isDown)
@@ -325,6 +334,108 @@ public class UIScene : MonoBehaviour
         yesLabel.UpdateAnchors();
         //yesLabel.SetRawRect((yesLabel.pivotOffset.x - 0.5f) * yesLabel.width, yesLabel.transform.localPosition.y, 120f, yesLabel.height);
         //noLabel.SetRawRect(0f, noLabel.transform.localPosition.y, 120f, noLabel.height); // Unneeded: it is anchored to yesLabel
+    }
+
+    /// <summary>Announce button text for screen readers when button is selected</summary>
+    protected virtual void AnnounceButtonForScreenReader(GameObject go)
+    {
+        try
+        {
+            String announcement = GetButtonText(go);
+
+            if (!String.IsNullOrEmpty(announcement))
+            {
+                // Check if button is disabled and append status
+                if (IsButtonDisabled(go))
+                    announcement += ", disabled";
+
+                ScreenReaderManager.Instance.Speak(announcement, false);
+            }
+        }
+        catch (Exception e)
+        {
+            // Silently fail - don't break the game if screen reader has issues
+            Log.Error("Screen reader announcement failed: " + e.Message);
+        }
+    }
+
+    /// <summary>Extract text from button GameObject - checks multiple common patterns</summary>
+    protected virtual String GetButtonText(GameObject go)
+    {
+        if (go == null)
+            return null;
+
+        // Pattern 1: Direct UILabel on the GameObject (common for Yes/No buttons, list items)
+        UILabel label = go.GetComponent<UILabel>();
+        if (label != null)
+        {
+            String text = GetLocalizedText(go, label);
+            if (!String.IsNullOrEmpty(text))
+                return text;
+        }
+
+        // Pattern 2: UILabel in first child (common for menu buttons)
+        if (go.transform.childCount > 0)
+        {
+            GameObject child = go.transform.GetChild(0).gameObject;
+            label = child.GetComponent<UILabel>();
+            if (label != null)
+            {
+                String text = GetLocalizedText(child, label);
+                if (!String.IsNullOrEmpty(text))
+                    return text;
+            }
+        }
+
+        // Pattern 3: Check all children for UILabel (fallback for complex structures)
+        label = go.GetComponentInChildren<UILabel>();
+        if (label != null)
+        {
+            String text = GetLocalizedText(label.gameObject, label);
+            if (!String.IsNullOrEmpty(text))
+                return text;
+        }
+
+        return null;
+    }
+
+    /// <summary>Get localized/parsed text from a UILabel, checking for UILocalize component</summary>
+    private String GetLocalizedText(GameObject go, UILabel label)
+    {
+        // Check if there's a UILocalize component (handles localization keys)
+        UILocalize localize = go.GetComponent<UILocalize>();
+        if (localize != null && !String.IsNullOrEmpty(localize.key))
+        {
+            // Get the actual localized text using the key
+            return Localization.GetWithDefault(localize.key);
+        }
+
+        // Fallback to parsed text (handles TextPatcher modifications)
+        return label.Parser.ParsedText;
+    }
+
+    /// <summary>Check if button is in a disabled state using multiple detection methods</summary>
+    protected virtual Boolean IsButtonDisabled(GameObject go)
+    {
+        if (go == null)
+            return false;
+
+        // Method 1: Check UIButton state (true disabled state)
+        UIButton button = go.GetComponent<UIButton>();
+        if (button != null && button.state == UIButtonColor.State.Disabled)
+            return true;
+
+        // Method 2: Check sprite alpha (visually disabled pattern, e.g., Continue button when no save exists)
+        UISprite sprite = go.GetComponent<UISprite>();
+        if (sprite != null && sprite.color.a < 0.9f)
+            return true;
+
+        // Method 3: Check BoxCollider enabled state
+        BoxCollider collider = go.GetComponent<BoxCollider>();
+        if (collider != null && !collider.enabled)
+            return true;
+
+        return false;
     }
 
     public UIScene.SceneVoidDelegate AfterSceneShown;
