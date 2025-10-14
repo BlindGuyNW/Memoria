@@ -7,6 +7,7 @@ using Memoria;
 using Memoria.Prime;
 using Memoria.Assets;
 using Memoria.Scripts;
+using Memoria.Accessibility;
 using UnityEngine;
 
 [Flags]
@@ -99,6 +100,9 @@ public class FieldMap : HonoBehavior
         this.attachList = new EBG_ATTACH_DEF[10];
         this.isBattleBackupPos = false;
         this.BG_init();
+
+        // Initialize accessible navigation
+        AccessibleNavigationManager.Instance.Initialize();
         if (FF9StateSystem.Common.FF9.fldMapNo == 2507) // I. Castle/Stairwell, room with ladders and stairs
         {
             base.StartCoroutine(this.DelayedActiveTri());
@@ -154,6 +158,9 @@ public class FieldMap : HonoBehavior
     {
         HonoBehaviorSystem.FrameSkipEnabled = false;
         HonoBehaviorSystem.TargetFrameTime = 0.0333333351f;
+
+        // Shutdown accessible navigation
+        AccessibleNavigationManager.Instance.Shutdown();
     }
 
     public Camera GetMainCamera()
@@ -286,6 +293,9 @@ public class FieldMap : HonoBehavior
         this.ActivateCamera();
         this.BgAnimationService();
         this.BgAttachService();
+
+        // Update accessible navigation
+        AccessibleNavigationManager.Instance.Update();
     }
 
     public override void HonoLateUpdate()
