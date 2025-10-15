@@ -82,7 +82,7 @@ namespace Memoria.Accessibility
                 {
                     _hasInitialized = true;
                     Log.Message("[AccessibleNavigation] Player controller found on attempt {0}!", _initAttempts);
-                    ScreenReaderManager.Instance.Speak("Navigation ready. Press page down to scan for objects.", false);
+                    ScreenReaderManager.Instance.Speak("Navigation ready. Press page down to scan for objects. Press quote to rescan.", false);
                     return;
                 }
             }
@@ -172,8 +172,8 @@ namespace Memoria.Accessibility
             UpdateTrackedTarget();
 
             // Try multiple key options since the game may intercept some
-            // Option 1: [ and ] for cycling, \ for walk-to
-            // Option 2: PageUp/PageDown for cycling, Home for walk-to
+            // Option 1: [ and ] for cycling, \ for walk-to, ' for rescan
+            // Option 2: PageUp/PageDown for cycling, Home for walk-to, Quote for rescan
             // Option 3: Insert/Delete for cycling, End for walk-to
 
             if (Input.GetKeyDown(KeyCode.LeftBracket) || Input.GetKeyDown(KeyCode.PageUp) || Input.GetKeyDown(KeyCode.Insert))
@@ -188,8 +188,13 @@ namespace Memoria.Accessibility
             }
             else if (Input.GetKeyDown(KeyCode.Backslash) || Input.GetKeyDown(KeyCode.Home) || Input.GetKeyDown(KeyCode.End))
             {
-                Log.Message("[AccessibleNavigation] Walk-to key pressed");
-                StartNavigationGuidance();
+                Log.Message("[AccessibleNavigation] Walk-to toggle key pressed");
+                ToggleNavigationGuidance();
+            }
+            else if (Input.GetKeyDown(KeyCode.Quote))
+            {
+                Log.Message("[AccessibleNavigation] Rescan key pressed");
+                ForceRescan();
             }
         }
 
@@ -221,16 +226,59 @@ namespace Memoria.Accessibility
 
             Log.Message("[AccessibleNavigation] Player position: {0}", playerPos);
 
+            // DEBUG: Count all objects by type
+            int totalObjects = 0;
+            int invisibleObjects = 0;
+            int actorCount = 0;
+            int quadCount = 0;
+            int otherCount = 0;
+
             // Iterate through all active objects in the scene
+            for (ObjList objList = eventEngine.GetActiveObjList(); objList != null; objList = objList.next)
+            {
+                totalObjects++;
+                Obj obj = objList.obj;
+                if (obj == null)
+                    continue;
+
+                // Count invisible objects
+                if ((obj.flags & EventEngine.flagShow) == 0)
+                {
+                    invisibleObjects++;
+                    continue;
+                }
+
+                // Count by type
+                if (obj.cid == EventEngine.classActor)
+                    actorCount++;
+                else if (obj.cid == EventEngine.classQuad)
+                    quadCount++;
+                else if (obj.cid != EventEngine.classObj && obj.cid != EventEngine.classSeq && obj.cid != EventEngine.classThread)
+                    otherCount++;
+            }
+
+            Log.Message("[AccessibleNavigation] Scene stats: Total={0}, Invisible={1}, Actors={2}, Quads={3}, Other={4}",
+                totalObjects, invisibleObjects, actorCount, quadCount, otherCount);
+
+            // Now do the actual scan
             for (ObjList objList = eventEngine.GetActiveObjList(); objList != null; objList = objList.next)
             {
                 Obj obj = objList.obj;
                 if (obj == null)
                     continue;
 
-                // Skip invisible objects
-                if ((obj.flags & EventEngine.flagShow) == 0)
+                // Log invisible objects for debugging (to understand what we're missing)
+                bool isInvisible = (obj.flags & EventEngine.flagShow) == 0;
+                if (isInvisible)
+                {
+                    if (obj.cid == EventEngine.classQuad)
+                        Log.Message("[AccessibleNavigation] INVISIBLE QUAD: sid={0} uid={1} flags={2}", obj.sid, obj.uid, obj.flags);
+                    else if (obj.cid == EventEngine.classActor)
+                        Log.Message("[AccessibleNavigation] INVISIBLE ACTOR: sid={0} uid={1} flags={2}", obj.sid, obj.uid, obj.flags);
+                    else
+                        Log.Message("[AccessibleNavigation] INVISIBLE OTHER: cid={0} sid={1} uid={2} flags={3}", obj.cid, obj.sid, obj.uid, obj.flags);
                     continue;
+                }
 
                 // Handle Actors (cid == 4)
                 if (obj.cid == EventEngine.classActor)
@@ -265,17 +313,28 @@ namespace Memoria.Accessibility
                     Log.Message("[AccessibleNavigation] Actor: sid={0} uid={1} model={2} go={3} dist={4:F0} level={5} talk={6} push={7} duel={8} party={9} showIcon={10}",
                         actor.sid, actor.uid, actor.model, goName, distance, actor.level, hasTalk, hasPush, hasDuel, isPartyMember, wouldShowIcon);
 
-                    // Skip non-interactive objects (unless they're party members or would show icon)
-                    if (!isInteractive && !isPartyMember && !wouldShowIcon)
+                    // Detect unique NPCs by model - these are important for navigation
+                    // Common crowd models: 627 (generic NPC)
+                    // Unique models: 22 (ladder), 121 (Puck), etc.
+                    bool isCommonCrowdModel = actor.model == 627;
+                    bool isUniqueNPC = !isCommonCrowdModel;
+
+                    // For accessibility, include:
+                    // - Interactive objects (talk/push)
+                    // - Party members
+                    // - Unique NPCs (different model from crowd) - important for navigation
+                    bool shouldInclude = isInteractive || isPartyMember || isUniqueNPC;
+
+                    if (!shouldInclude)
                     {
-                        Log.Message("[AccessibleNavigation]   -> SKIPPED: Not interactive and not party member and won't show icon");
+                        Log.Message("[AccessibleNavigation]   -> SKIPPED: Common crowd NPC (model={0})", actor.model);
                         continue;
                     }
 
-                    // Prioritize objects that would show an icon
-                    if (!wouldShowIcon && !isPartyMember)
+                    // Skip very distant non-interactive objects to reduce clutter
+                    if (!isInteractive && !isPartyMember && distance > 10000f)
                     {
-                        Log.Message("[AccessibleNavigation]   -> SKIPPED: Won't show icon (level={0}, needs level>1)", actor.level);
+                        Log.Message("[AccessibleNavigation]   -> SKIPPED: Too far ({0:F0}) and not interactive", distance);
                         continue;
                     }
 
@@ -326,6 +385,7 @@ namespace Memoria.Accessibility
                     // Check if quad has talk or push events
                     bool hasTalk = eventEngine.GetIP((int)quad.sid, EventEngine.tagTalk, quad.ebData) != eventEngine.nil;
                     bool hasPush = eventEngine.GetIP((int)quad.sid, EventEngine.tagPush, quad.ebData) != eventEngine.nil;
+                    bool isInteractive = hasTalk || hasPush;
 
                     // Check if this would actually show an icon (requires level > 1)
                     bool wouldShowIcon = (hasTalk || hasPush) && quad.level > 1;
@@ -344,13 +404,21 @@ namespace Memoria.Accessibility
                     Vector3 toObject = objPos - playerPos;
                     float distance = toObject.magnitude;
 
-                    Log.Message("[AccessibleNavigation] Quad: sid={0} uid={1} pos={2} dist={3:F0} level={4} talk={5} push={6} showIcon={7} go={8}",
-                        quad.sid, quad.uid, objPos, distance, quad.level, hasTalk, hasPush, wouldShowIcon, goName ?? "null");
+                    Log.Message("[AccessibleNavigation] Quad: sid={0} uid={1} pos={2} dist={3:F0} level={4} talk={5} push={6} showIcon={7} go={8} flags={9}",
+                        quad.sid, quad.uid, objPos, distance, quad.level, hasTalk, hasPush, wouldShowIcon, goName ?? "null", quad.flags);
 
-                    // Skip quads that won't show an icon
-                    if (!wouldShowIcon)
+                    // Skip quads that have no interactive events
+                    if (!isInteractive)
                     {
-                        Log.Message("[AccessibleNavigation]   -> SKIPPED: Won't show icon (level={0}, needs level>1)", quad.level);
+                        Log.Message("[AccessibleNavigation]   -> SKIPPED: No talk/push events");
+                        continue;
+                    }
+
+                    // For accessibility, include interactive quads even if they don't show icons
+                    // But skip them if they're very far AND won't show an icon (to reduce clutter)
+                    if (!wouldShowIcon && distance > 5000f)
+                    {
+                        Log.Message("[AccessibleNavigation]   -> SKIPPED: Very far ({0:F0}) and won't show icon (level={1})", distance, quad.level);
                         continue;
                     }
 
@@ -501,6 +569,10 @@ namespace Memoria.Accessibility
             // Check special model IDs
             switch (actor.model)
             {
+                case 22: // Ladder (Alexandria rooftops)
+                    return "Ladder";
+                case 121: // Puck (rat kid in Alexandria)
+                    return "NPC";
                 case 200: // Air Cab
                 case 294: // Gargan Car
                 case 306: // Gargant
@@ -521,6 +593,11 @@ namespace Memoria.Accessibility
                 return "NPC";
             else if (hasPush)
                 return "Interactive Object";
+
+            // For non-interactive objects, check if they're unique (probably important)
+            bool isCommonCrowdModel = actor.model == 627;
+            if (!isCommonCrowdModel)
+                return "NPC"; // Unique model = probably an important NPC
 
             // Check for other types based on flags
             return "Object";
@@ -552,6 +629,8 @@ namespace Memoria.Accessibility
             // Check special model IDs
             switch (actor.model)
             {
+                case 22: return "Ladder";
+                case 121: return "Puck";
                 case 200: return "Air Cab";
                 case 294: return "Gargan Car";
                 case 306: return "Gargant";
@@ -727,7 +806,7 @@ namespace Memoria.Accessibility
                 return;
             }
 
-            string announcement = String.Format("{0} objects nearby. Use page up and page down to cycle, home to walk to selected.", _nearbyObjects.Count);
+            string announcement = String.Format("{0} objects nearby. Use page up and page down to cycle, home to walk to selected, quote to rescan.", _nearbyObjects.Count);
             Log.Message("[AccessibleNavigation] Announcing: {0}", announcement);
             ScreenReaderManager.Instance.Speak(announcement, false);
 
@@ -776,6 +855,13 @@ namespace Memoria.Accessibility
                 return "far";
             else
                 return "very far";
+        }
+
+        private void ForceRescan()
+        {
+            Log.Message("[AccessibleNavigation] ForceRescan called");
+            ScreenReaderManager.Instance.Speak("Rescanning", true);
+            ScanNearbyObjects();
         }
 
         private void CyclePrevious()
@@ -852,6 +938,25 @@ namespace Memoria.Accessibility
             string announcement = String.Format("Navigate to {0}. {1}", selectedObj.name, direction);
             Log.Message("[AccessibleNavigation] Path has {0} waypoints. {1}", _pathWaypoints.Count, announcement);
             ScreenReaderManager.Instance.Speak(announcement, false);
+        }
+
+        private void ToggleNavigationGuidance()
+        {
+            // If navigation is active, stop it
+            if (_trackedTarget != null)
+            {
+                Log.Message("[AccessibleNavigation] Stopping navigation to {0}", _trackedTarget.name);
+                ScreenReaderManager.Instance.Speak("Navigation cancelled", true);
+                _trackedTarget = null;
+                _pathWaypoints.Clear();
+                _currentWaypointIndex = 0;
+            }
+            // Otherwise, start navigation
+            else
+            {
+                Log.Message("[AccessibleNavigation] Starting navigation");
+                StartNavigationGuidance();
+            }
         }
 
         private bool TestPathfinding(Vector3 targetPos)

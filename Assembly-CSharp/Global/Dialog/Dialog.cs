@@ -1,6 +1,7 @@
 ﻿using Assets.Sources.Scripts.UI.Common;
 using Memoria;
 using Memoria.Assets;
+using Memoria.Prime;
 using Memoria.ScreenReader;
 using System;
 using System.Collections;
@@ -825,14 +826,35 @@ public class Dialog : MonoBehaviour
     {
         if (this.currentState == Dialog.State.CompleteAnimation)
         {
-            this.SelectChoice = this.choiceList.IndexOf(go);
-            if (!this.isMuteSelectSound)
-                ETb.SndMove();
-            else
-                this.isMuteSelectSound = false;
+            Int32 newChoiceIndex = this.choiceList.IndexOf(go);
 
-            // Announce the selected choice for screen readers
-            AnnounceCurrentChoiceForScreenReader();
+            Log.Message($"[ScreenReader] Dialog.OnItemSelect: go={go?.name}, choiceListCount={this.choiceList.Count}, foundIndex={newChoiceIndex}");
+
+            // Defensive: Only update if we found the button
+            if (newChoiceIndex >= 0)
+            {
+                this.SelectChoice = newChoiceIndex;
+
+                if (!this.isMuteSelectSound)
+                    ETb.SndMove();
+                else
+                    this.isMuteSelectSound = false;
+
+                // Announce the selected choice for screen readers
+                AnnounceCurrentChoiceForScreenReader();
+            }
+            else
+            {
+                // Button not found in choiceList - this shouldn't happen!
+                Log.Warning($"[ScreenReader] Dialog.OnItemSelect: Button {go?.name} not found in choiceList (count={this.choiceList.Count})");
+
+                // Dump choiceList for debugging
+                for (Int32 i = 0; i < this.choiceList.Count; i++)
+                {
+                    GameObject choice = this.choiceList[i];
+                    Log.Warning($"[ScreenReader]   choiceList[{i}] = {(choice != null ? choice.name : "null")}");
+                }
+            }
         }
     }
 
@@ -1702,7 +1724,19 @@ public class Dialog : MonoBehaviour
         text = Regex.Replace(text, @"\[.*?\]", String.Empty); // Remove [TAG] style tags
         text = Regex.Replace(text, @"\{.*?\}", String.Empty); // Remove {TAG} style tags
 
-        // Clean up multiple spaces and newlines
+        // Replace first newline with colon and space (for character name: dialog format)
+        int firstNewline = text.IndexOf('\n');
+        if (firstNewline > 0 && firstNewline < text.Length - 1)
+        {
+            // Check if there's text before the newline (likely a character name)
+            String beforeNewline = text.Substring(0, firstNewline).Trim();
+            if (!String.IsNullOrEmpty(beforeNewline))
+            {
+                text = beforeNewline + ": " + text.Substring(firstNewline + 1);
+            }
+        }
+
+        // Clean up remaining multiple spaces and newlines
         text = Regex.Replace(text, @"\s+", " ");
         text = text.Trim();
 
@@ -1744,7 +1778,8 @@ public class Dialog : MonoBehaviour
         }
         catch (Exception e)
         {
-            SoundLib.VALog($"Screen reader choice announcement failed: {e.Message}");
+            Log.Error($"[ScreenReader] Screen reader choice announcement failed: {e.Message}");
+            Log.Error(e);
         }
     }
 
@@ -1756,18 +1791,62 @@ public class Dialog : MonoBehaviour
         try
         {
             String[] choices = this.ChoicePhrases;
-            Int32 currentChoice = this.SelectChoice + this.startChoiceRow;
+            // ChoicePhrases[0] is the prompt, choices start at index 1
+            // SelectChoice is the index into choiceList (0, 1, 2, etc.)
+            Int32 currentChoice = this.SelectChoice + 1;
+
+            Log.Message($"[ScreenReader] AnnounceChoice: SelectChoice={this.SelectChoice}, startChoiceRow={this.startChoiceRow}, currentChoice={currentChoice}, choicesLength={choices?.Length ?? 0}, EndChoiceRow={this.EndChoiceRow}");
+
+            // Dump the full ChoicePhrases array for debugging
+            if (choices != null)
+            {
+                for (Int32 i = 0; i < choices.Length; i++)
+                {
+                    Log.Message($"[ScreenReader]   ChoicePhrases[{i}] = '{choices[i]}'");
+                }
+            }
 
             if (choices != null && currentChoice >= 0 && currentChoice < choices.Length)
             {
                 String choiceText = StripFormattingTags(choices[currentChoice]);
                 if (!String.IsNullOrEmpty(choiceText))
+                {
+                    Log.Message($"[ScreenReader] Speaking choice: '{choiceText}'");
                     ScreenReaderManager.Instance.Speak(choiceText, interrupt: true);
+                }
+                else
+                {
+                    Log.Warning($"[ScreenReader] Choice text empty after stripping tags for index {currentChoice}");
+                    Log.Warning($"[ScreenReader] Raw choice text was: '{choices[currentChoice]}'");
+                }
+            }
+            else
+            {
+                Log.Warning($"[ScreenReader] Invalid choice index: currentChoice={currentChoice}, choicesLength={choices?.Length ?? 0}");
+
+                // Try to announce using SelectChoice directly as index into the filtered choices
+                Log.Message($"[ScreenReader] Attempting fallback: using SelectChoice={this.SelectChoice} directly");
+                Int32 validChoiceCount = 0;
+                for (Int32 i = this.startChoiceRow; i < choices.Length; i++)
+                {
+                    if (validChoiceCount == this.SelectChoice)
+                    {
+                        String fallbackText = StripFormattingTags(choices[i]);
+                        if (!String.IsNullOrEmpty(fallbackText))
+                        {
+                            Log.Message($"[ScreenReader] Fallback speaking: '{fallbackText}'");
+                            ScreenReaderManager.Instance.Speak(fallbackText, interrupt: true);
+                            return;
+                        }
+                    }
+                    validChoiceCount++;
+                }
             }
         }
         catch (Exception e)
         {
-            SoundLib.VALog($"Screen reader choice selection failed: {e.Message}");
+            Log.Error($"[ScreenReader] Screen reader choice selection failed: {e.Message}");
+            Log.Error(e);
         }
     }
 
