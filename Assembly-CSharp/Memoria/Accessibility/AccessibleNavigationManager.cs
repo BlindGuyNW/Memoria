@@ -143,7 +143,17 @@ namespace Memoria.Accessibility
                 _nearbyObjects.Clear();
                 _currentSelection = -1;
 
-                ScreenReaderManager.Instance.Speak($"Entered new area", false);
+                // Announce the area name
+                string areaName = FF9StateSystem.Common.FF9.mapNameStr;
+                Log.Message("[AccessibleNavigation] Area change - fldMapNo={0}, mapNameStr='{1}'", currentMap, areaName ?? "null");
+
+                string lookupResult = FF9TextTool.LocationName(currentMap);
+                Log.Message("[AccessibleNavigation] FF9TextTool.LocationName({0}) returned '{1}'", currentMap, lookupResult ?? "null");
+
+                if (!String.IsNullOrEmpty(areaName))
+                    ScreenReaderManager.Instance.Speak($"Entered {areaName}", false);
+                else
+                    ScreenReaderManager.Instance.Speak($"Entered area {currentMap}", false);
             }
         }
 
@@ -185,7 +195,8 @@ namespace Memoria.Accessibility
 
         private void ScanNearbyObjects()
         {
-            Log.Message("[AccessibleNavigation] ScanNearbyObjects called");
+            Log.Message("[AccessibleNavigation] ScanNearbyObjects called - clearing {0} existing objects", _nearbyObjects.Count);
+            Log.Message("[AccessibleNavigation]   Stack trace: {0}", System.Environment.StackTrace);
 
             _nearbyObjects.Clear();
             _currentSelection = -1;
@@ -268,8 +279,10 @@ namespace Memoria.Accessibility
                         continue;
                     }
 
-                    // Test if we can reach this object using pathfinding
-                    bool canReach = distance < 500f || TestPathfinding(objPos); // Very close OR pathfinding succeeds
+                    // Test if we can reach this object
+                    // If it shows an icon, the game already validated it's reachable - trust that
+                    // Otherwise, test pathfinding for very distant objects
+                    bool canReach = wouldShowIcon || distance < 3000f || TestPathfinding(objPos);
                     if (!canReach)
                     {
                         Log.Message("[AccessibleNavigation]   -> SKIPPED: No path found (distance={0:F0})", distance);
@@ -341,8 +354,10 @@ namespace Memoria.Accessibility
                         continue;
                     }
 
-                    // Test if we can reach this zone using pathfinding
-                    bool canReach = distance < 500f || TestPathfinding(objPos); // Very close OR pathfinding succeeds
+                    // Test if we can reach this zone
+                    // If it shows an icon, the game already validated it's reachable - trust that
+                    // Otherwise, test pathfinding for very distant objects
+                    bool canReach = wouldShowIcon || distance < 3000f || TestPathfinding(objPos);
                     if (!canReach)
                     {
                         Log.Message("[AccessibleNavigation]   -> SKIPPED: No path found (distance={0:F0})", distance);
@@ -356,11 +371,33 @@ namespace Memoria.Accessibility
                     int clockDir = CalculateClockDirection(playerForward, toObject);
 
                     // Determine name and type
-                    string quadName;
-                    string quadType;
+                    string quadName = null;
+                    string quadType = null;
 
+                    // Try to analyze the event script first to get meaningful info
+                    string scriptInfo = null;
+                    if (hasPush)
+                        scriptInfo = AnalyzeEventScript(quad, EventEngine.tagPush, eventEngine);
+                    else if (hasTalk)
+                        scriptInfo = AnalyzeEventScript(quad, EventEngine.tagTalk, eventEngine);
+
+                    if (!String.IsNullOrEmpty(scriptInfo))
+                    {
+                        // We found meaningful info! Use it
+                        quadName = scriptInfo;
+
+                        // Determine type from the script info
+                        if (scriptInfo.StartsWith("Item:"))
+                            quadType = "Item";
+                        else if (scriptInfo.StartsWith("Gil:"))
+                            quadType = "Gil";
+                        else if (scriptInfo.StartsWith("Door") || scriptInfo.StartsWith("Exit"))
+                            quadType = "Door";
+                        else
+                            quadType = "Trigger";
+                    }
                     // Use GameObject name if meaningful
-                    if (!String.IsNullOrEmpty(goName) && !goName.StartsWith("obj"))
+                    else if (!String.IsNullOrEmpty(goName) && !goName.StartsWith("obj"))
                     {
                         quadName = goName;
                         quadType = "Interactive Zone";
@@ -535,6 +572,150 @@ namespace Memoria.Accessibility
             return $"{baseName} {actor.sid}";
         }
 
+        /// <summary>
+        /// Analyzes an event script to determine what a trigger/object actually does
+        /// </summary>
+        private string AnalyzeEventScript(Obj obj, int tagID, EventEngine eventEngine)
+        {
+            int scriptOffset = eventEngine.GetIP((int)obj.sid, tagID, obj.ebData);
+            if (scriptOffset == eventEngine.nil || obj.ebData == null || obj.ebData.Length == 0)
+            {
+                Log.Message("[AccessibleNavigation] AnalyzeEventScript: No script found (offset={0}, ebData={1})",
+                    scriptOffset, obj.ebData?.Length ?? 0);
+                return null;
+            }
+
+            Log.Message("[AccessibleNavigation] AnalyzeEventScript: sid={0} tag={1} offset={2} dataLen={3}",
+                obj.sid, tagID, scriptOffset, obj.ebData.Length);
+
+            try
+            {
+                // Scan through the event bytecode looking for meaningful opcodes
+                int maxScan = Math.Min(scriptOffset + 500, obj.ebData.Length); // Scan first ~500 bytes (increased!)
+                Log.Message("[AccessibleNavigation]   Scanning from {0} to {1}", scriptOffset, maxScan);
+
+                // Track what we find to categorize unknown triggers
+                bool hasItem = false;
+                bool hasGil = false;
+                bool hasDoor = false;
+                bool hasDialog = false;
+                bool hasBattle = false;
+                string itemInfo = null;
+                string gilInfo = null;
+                string doorInfo = null;
+
+                for (int i = scriptOffset; i < maxScan && i < obj.ebData.Length; i++)
+                {
+                    EBin.event_code_binary opcode = (EBin.event_code_binary)obj.ebData[i];
+
+                    // Log ALL opcodes if we're looking for doors (increased from 20)
+                    if (i < scriptOffset + 100)
+                        Log.Message("[AccessibleNavigation]   offset {0}: opcode={1} (0x{2:X2})", i, opcode, (byte)opcode);
+
+                    switch (opcode)
+                    {
+                        case EBin.event_code_binary.ITEMADD: // 0x48
+                            // Format: [opcode] [arg flags] [item ID low] [item ID high] [count]
+                            if (i + 4 < obj.ebData.Length)
+                            {
+                                int itemID = obj.ebData[i + 2] | (obj.ebData[i + 3] << 8);
+                                int count = obj.ebData[i + 4];
+                                Log.Message("[AccessibleNavigation]   FOUND ITEMADD: itemID={0} count={1}", itemID, count);
+                                string itemName = ETb.GetItemName(itemID);
+                                if (!String.IsNullOrEmpty(itemName))
+                                {
+                                    if (count > 1)
+                                        itemInfo = $"Item: {itemName} x{count}";
+                                    else
+                                        itemInfo = $"Item: {itemName}";
+                                    hasItem = true;
+                                }
+                            }
+                            break;
+
+                        case EBin.event_code_binary.GILADD: // 0xCE
+                            // Format: [opcode] [arg flags] [gil low] [gil mid] [gil high]
+                            if (i + 4 < obj.ebData.Length)
+                            {
+                                int gil = obj.ebData[i + 2] | (obj.ebData[i + 3] << 8) | (obj.ebData[i + 4] << 16);
+                                Log.Message("[AccessibleNavigation]   FOUND GILADD: gil={0}", gil);
+                                if (gil > 0)
+                                {
+                                    gilInfo = $"Gil: {gil}";
+                                    hasGil = true;
+                                }
+                            }
+                            break;
+
+                        case EBin.event_code_binary.MAPJUMP: // 0x2B
+                        case EBin.event_code_binary.WMAPJUMP: // World map jump
+                            // Map jump format: [opcode] [arg flags] [field ID low] [field ID high]
+                            Log.Message("[AccessibleNavigation]   FOUND MAPJUMP at offset {0}!", i);
+                            if (i + 3 < obj.ebData.Length)
+                            {
+                                // Skip argument flag byte at i+1, read field ID at i+2 and i+3
+                                int destMap = obj.ebData[i + 2] | (obj.ebData[i + 3] << 8);
+                                Log.Message("[AccessibleNavigation]   MAPJUMP destMap={0}", destMap);
+                                string destName = FF9TextTool.LocationName(destMap);
+                                Log.Message("[AccessibleNavigation]   Location name lookup: '{0}'", destName ?? "null");
+                                if (!String.IsNullOrEmpty(destName) && destName != destMap.ToString())
+                                    doorInfo = $"Door to {destName}";
+                                else
+                                    doorInfo = $"Exit to area {destMap}";
+                                hasDoor = true;
+                                Log.Message("[AccessibleNavigation]   Set doorInfo='{0}'", doorInfo);
+                            }
+                            else
+                            {
+                                Log.Message("[AccessibleNavigation]   MAPJUMP found but not enough bytes remaining");
+                            }
+                            break;
+
+                        case EBin.event_code_binary.MES: // 0x1F - Show message
+                        case EBin.event_code_binary.MESN: // 0x20 - Show named message
+                        case EBin.event_code_binary.MESA: // Ask question variant
+                        case EBin.event_code_binary.MESAN: // Ask question variant 2
+                            hasDialog = true;
+                            break;
+
+                        case EBin.event_code_binary.ENCOUNT: // Random encounter
+                        case EBin.event_code_binary.ENCOUNT2: // Encounter variant
+                        case EBin.event_code_binary.BTLSET: // Battle setup
+                            hasBattle = true;
+                            break;
+                    }
+                }
+
+                // Return the most important info we found (priority order)
+                if (itemInfo != null)
+                    return itemInfo;
+                if (gilInfo != null)
+                    return gilInfo;
+                if (doorInfo != null)
+                    return doorInfo;
+
+                // Categorize by what we found (less specific)
+                if (hasBattle)
+                {
+                    Log.Message("[AccessibleNavigation]   Categorized as: Battle Trigger");
+                    return "Battle Encounter";
+                }
+                if (hasDialog)
+                {
+                    Log.Message("[AccessibleNavigation]   Categorized as: Story Trigger");
+                    return "Story Event";
+                }
+
+                Log.Message("[AccessibleNavigation]   No meaningful opcodes found in scan range");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[AccessibleNavigation] Error analyzing event script: {ex.Message}");
+            }
+
+            return null; // No meaningful info found
+        }
+
         private void AnnounceObjectList()
         {
             Log.Message("[AccessibleNavigation] AnnounceObjectList called with {0} objects", _nearbyObjects.Count);
@@ -560,8 +741,13 @@ namespace Memoria.Accessibility
 
         private void AnnounceCurrentSelection()
         {
+            Log.Message("[AccessibleNavigation] AnnounceCurrentSelection: index={0}, count={1}", _currentSelection, _nearbyObjects.Count);
+
             if (_currentSelection < 0 || _currentSelection >= _nearbyObjects.Count)
+            {
+                Log.Warning("[AccessibleNavigation]   Invalid selection index! Aborting announcement.");
                 return;
+            }
 
             InteractiveObject obj = _nearbyObjects[_currentSelection];
             string distanceDesc = GetDistanceDescription(obj.distance);
@@ -574,6 +760,7 @@ namespace Memoria.Accessibility
                 status = "interaction available, ";
 
             string announcement = $"{_currentSelection + 1} of {_nearbyObjects.Count}: {obj.name}, {status}{obj.type}, {obj.clockDirection} o'clock, {distanceDesc}";
+            Log.Message("[AccessibleNavigation]   Announcing: {0}", announcement);
             ScreenReaderManager.Instance.Speak(announcement, true);
         }
 
@@ -593,33 +780,43 @@ namespace Memoria.Accessibility
 
         private void CyclePrevious()
         {
+            Log.Message("[AccessibleNavigation] CyclePrevious: _currentSelection={0}, count={1}", _currentSelection, _nearbyObjects.Count);
+
             // Scan if we haven't yet
             if (_nearbyObjects.Count == 0)
             {
+                Log.Message("[AccessibleNavigation]   List is empty, triggering scan");
                 ScanNearbyObjects();
                 return;
             }
 
+            int oldSelection = _currentSelection;
             _currentSelection--;
             if (_currentSelection < 0)
                 _currentSelection = _nearbyObjects.Count - 1;
 
+            Log.Message("[AccessibleNavigation]   Changed selection from {0} to {1}", oldSelection, _currentSelection);
             AnnounceCurrentSelection();
         }
 
         private void CycleNext()
         {
+            Log.Message("[AccessibleNavigation] CycleNext: _currentSelection={0}, count={1}", _currentSelection, _nearbyObjects.Count);
+
             // Scan if we haven't yet
             if (_nearbyObjects.Count == 0)
             {
+                Log.Message("[AccessibleNavigation]   List is empty, triggering scan");
                 ScanNearbyObjects();
                 return;
             }
 
+            int oldSelection = _currentSelection;
             _currentSelection++;
             if (_currentSelection >= _nearbyObjects.Count)
                 _currentSelection = 0;
 
+            Log.Message("[AccessibleNavigation]   Changed selection from {0} to {1}", oldSelection, _currentSelection);
             AnnounceCurrentSelection();
         }
 
