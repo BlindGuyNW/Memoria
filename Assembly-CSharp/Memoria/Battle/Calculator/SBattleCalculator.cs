@@ -1,6 +1,7 @@
 using FF9;
 using Memoria.Data;
 using Memoria.Prime;
+using Memoria.ScreenReader;
 using Memoria.Scripts;
 using System;
 using System.Reflection;
@@ -307,6 +308,52 @@ namespace Memoria
             else if ((v.Target.Flags & (CalcFlag.HpAlteration | CalcFlag.MpAlteration)) != 0)
                 when = BattleVoice.BattleMoment.Damaged;
             BattleVoice.TriggerOnHitted(target, when, v);
+
+            // Announce battle results to screen reader
+            try
+            {
+                BattleUnit targetUnit = new BattleUnit(target);
+                String announcement = targetUnit.Name + ": ";
+
+                if (v.Command.Data.info.dodge == 1 || (v.Context.Flags & BattleCalcFlags.Dodge) != 0)
+                {
+                    announcement += "Dodged";
+                }
+                else if ((v.Context.Flags & BattleCalcFlags.Miss) != 0)
+                {
+                    announcement += "Missed";
+                }
+                else if ((v.Target.Flags & (CalcFlag.HpRecovery | CalcFlag.MpRecovery)) != 0)
+                {
+                    if ((v.Target.Flags & CalcFlag.HpRecovery) != 0)
+                        announcement += "Healed " + v.Target.HpDamage + " HP";
+                    if ((v.Target.Flags & CalcFlag.MpRecovery) != 0)
+                    {
+                        if ((v.Target.Flags & CalcFlag.HpRecovery) != 0)
+                            announcement += ", ";
+                        announcement += "Recovered " + v.Target.MpDamage + " MP";
+                    }
+                }
+                else if ((v.Target.Flags & (CalcFlag.HpAlteration | CalcFlag.MpAlteration)) != 0)
+                {
+                    if ((v.Target.Flags & CalcFlag.HpAlteration) != 0)
+                        announcement += v.Target.HpDamage + " HP damage";
+                    if ((v.Target.Flags & CalcFlag.MpAlteration) != 0)
+                    {
+                        if ((v.Target.Flags & CalcFlag.HpAlteration) != 0)
+                            announcement += ", ";
+                        announcement += v.Target.MpDamage + " MP damage";
+                    }
+                }
+
+                if (announcement.Length > targetUnit.Name.Length + 2)
+                    ScreenReaderManager.Instance.Speak(announcement, false);
+            }
+            catch
+            {
+                // Silently fail if screen reader isn't available
+            }
+
             BattleCalculator.FrameAppliedEffectList.Add(v);
             if (target.bi.player != 0 || FF9StateSystem.Battle.isDebug)
                 return;
