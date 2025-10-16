@@ -82,7 +82,7 @@ namespace Memoria.Accessibility
                 {
                     _hasInitialized = true;
                     Log.Message("[AccessibleNavigation] Player controller found on attempt {0}!", _initAttempts);
-                    ScreenReaderManager.Instance.Speak("Navigation ready. Press page down to scan for objects. Press quote to rescan.", false);
+                    ScreenReaderManager.Instance.Speak("Navigation ready", false);
                     return;
                 }
             }
@@ -196,6 +196,16 @@ namespace Memoria.Accessibility
                 Log.Message("[AccessibleNavigation] Rescan key pressed");
                 ForceRescan();
             }
+            else if (Input.GetKeyDown(KeyCode.F9))
+            {
+                Log.Message("[AccessibleNavigation] Debug dump key pressed");
+                DumpAllObjects();
+            }
+            else if ((Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)) && Input.GetKeyDown(KeyCode.Return))
+            {
+                Log.Message("[AccessibleNavigation] Ctrl+Enter pressed - teleporting to target");
+                TeleportToSelectedObject();
+            }
         }
 
         private void ScanNearbyObjects()
@@ -222,9 +232,15 @@ namespace Memoria.Accessibility
             }
 
             Vector3 playerPos = _playerController.curPos;
-            Vector3 playerForward = _playerController.actor.transform.forward;
 
-            Log.Message("[AccessibleNavigation] Player position: {0}", playerPos);
+            // Get screen-space forward (accounting for camera twist)
+            // In world space, character might face one way, but camera twist changes screen direction
+            float twist = FF9StateSystem.Field.twist.y;
+            Vector3 worldForward = _playerController.actor.transform.forward;
+            Quaternion twistRotation = Quaternion.Euler(0f, twist, 0f);
+            Vector3 playerForward = twistRotation * worldForward;
+
+            Log.Message("[AccessibleNavigation] Player position: {0}, twist: {1}", playerPos, twist);
 
             // DEBUG: Count all objects by type
             int totalObjects = 0;
@@ -296,7 +312,11 @@ namespace Memoria.Accessibility
 
                     Vector3 objPos = new Vector3(actor.pos[0], actor.pos[1], actor.pos[2]);
                     Vector3 toObject = objPos - playerPos;
-                    float distance = toObject.magnitude;
+
+                    // Use horizontal (XZ) distance for consistency with pathfinding
+                    // Vertical distance (Y) can be misleading in multi-floor environments
+                    Vector3 toObject2D = new Vector3(toObject.x, 0, toObject.z);
+                    float distance = toObject2D.magnitude;
 
                     // Check if object has any interactive events (talk or push)
                     bool hasTalk = eventEngine.GetIP((int)actor.sid, EventEngine.tagTalk, actor.ebData) != eventEngine.nil;
@@ -313,35 +333,13 @@ namespace Memoria.Accessibility
                     Log.Message("[AccessibleNavigation] Actor: sid={0} uid={1} model={2} go={3} dist={4:F0} level={5} talk={6} push={7} duel={8} party={9} showIcon={10}",
                         actor.sid, actor.uid, actor.model, goName, distance, actor.level, hasTalk, hasPush, hasDuel, isPartyMember, wouldShowIcon);
 
-                    // Detect unique NPCs by model - these are important for navigation
-                    // Common crowd models: 627 (generic NPC)
-                    // Unique models: 22 (ladder), 121 (Puck), etc.
-                    bool isCommonCrowdModel = actor.model == 627;
-                    bool isUniqueNPC = !isCommonCrowdModel;
-
-                    // For accessibility, include:
-                    // - Interactive objects (talk/push)
-                    // - Party members
-                    // - Unique NPCs (different model from crowd) - important for navigation
-                    bool shouldInclude = isInteractive || isPartyMember || isUniqueNPC;
-
-                    if (!shouldInclude)
-                    {
-                        Log.Message("[AccessibleNavigation]   -> SKIPPED: Common crowd NPC (model={0})", actor.model);
-                        continue;
-                    }
-
-                    // Skip very distant non-interactive objects to reduce clutter
-                    if (!isInteractive && !isPartyMember && distance > 10000f)
-                    {
-                        Log.Message("[AccessibleNavigation]   -> SKIPPED: Too far ({0:F0}) and not interactive", distance);
-                        continue;
-                    }
+                    // Include all visible actors - no arbitrary model or distance filtering
+                    // We sort by distance anyway, and FF9 fields aren't huge
 
                     // Test if we can reach this object
                     // If it shows an icon, the game already validated it's reachable - trust that
-                    // Otherwise, test pathfinding for very distant objects
-                    bool canReach = wouldShowIcon || distance < 3000f || TestPathfinding(objPos);
+                    // Otherwise, test pathfinding
+                    bool canReach = wouldShowIcon || TestPathfinding(objPos);
                     if (!canReach)
                     {
                         Log.Message("[AccessibleNavigation]   -> SKIPPED: No path found (distance={0:F0})", distance);
@@ -402,7 +400,11 @@ namespace Memoria.Accessibility
                     objPos /= quad.n; // Average position = center
 
                     Vector3 toObject = objPos - playerPos;
-                    float distance = toObject.magnitude;
+
+                    // Use horizontal (XZ) distance for consistency with pathfinding
+                    // Vertical distance (Y) can be misleading in multi-floor environments
+                    Vector3 toObject2D = new Vector3(toObject.x, 0, toObject.z);
+                    float distance = toObject2D.magnitude;
 
                     Log.Message("[AccessibleNavigation] Quad: sid={0} uid={1} pos={2} dist={3:F0} level={4} talk={5} push={6} showIcon={7} go={8} flags={9}",
                         quad.sid, quad.uid, objPos, distance, quad.level, hasTalk, hasPush, wouldShowIcon, goName ?? "null", quad.flags);
@@ -414,18 +416,12 @@ namespace Memoria.Accessibility
                         continue;
                     }
 
-                    // For accessibility, include interactive quads even if they don't show icons
-                    // But skip them if they're very far AND won't show an icon (to reduce clutter)
-                    if (!wouldShowIcon && distance > 5000f)
-                    {
-                        Log.Message("[AccessibleNavigation]   -> SKIPPED: Very far ({0:F0}) and won't show icon (level={1})", distance, quad.level);
-                        continue;
-                    }
+                    // Include all interactive quads - no distance filtering
 
                     // Test if we can reach this zone
                     // If it shows an icon, the game already validated it's reachable - trust that
-                    // Otherwise, test pathfinding for very distant objects
-                    bool canReach = wouldShowIcon || distance < 3000f || TestPathfinding(objPos);
+                    // Otherwise, test pathfinding
+                    bool canReach = wouldShowIcon || TestPathfinding(objPos);
                     if (!canReach)
                     {
                         Log.Message("[AccessibleNavigation]   -> SKIPPED: No path found (distance={0:F0})", distance);
@@ -594,12 +590,6 @@ namespace Memoria.Accessibility
             else if (hasPush)
                 return "Interactive Object";
 
-            // For non-interactive objects, check if they're unique (probably important)
-            bool isCommonCrowdModel = actor.model == 627;
-            if (!isCommonCrowdModel)
-                return "NPC"; // Unique model = probably an important NPC
-
-            // Check for other types based on flags
             return "Object";
         }
 
@@ -732,17 +722,29 @@ namespace Memoria.Accessibility
                             Log.Message("[AccessibleNavigation]   FOUND MAPJUMP at offset {0}!", i);
                             if (i + 3 < obj.ebData.Length)
                             {
-                                // Skip argument flag byte at i+1, read field ID at i+2 and i+3
-                                int destMap = obj.ebData[i + 2] | (obj.ebData[i + 3] << 8);
-                                Log.Message("[AccessibleNavigation]   MAPJUMP destMap={0}", destMap);
-                                string destName = FF9TextTool.LocationName(destMap);
-                                Log.Message("[AccessibleNavigation]   Location name lookup: '{0}'", destName ?? "null");
-                                if (!String.IsNullOrEmpty(destName) && destName != destMap.ToString())
-                                    doorInfo = $"Door to {destName}";
+                                // Only use the FIRST MAPJUMP we find, not the last
+                                // Later MAPJUMPs are likely in conditional branches (after REPLYSW, etc.)
+                                // Without full script execution, we can't know which branch executes,
+                                // so we assume the first MAPJUMP is the primary/default path
+                                if (!hasDoor)
+                                {
+                                    // Skip argument flag byte at i+1, read field ID at i+2 and i+3
+                                    int destMap = obj.ebData[i + 2] | (obj.ebData[i + 3] << 8);
+                                    Log.Message("[AccessibleNavigation]   MAPJUMP destMap={0}", destMap);
+                                    string destName = FF9TextTool.LocationName(destMap);
+                                    Log.Message("[AccessibleNavigation]   Location name lookup: '{0}'", destName ?? "null");
+                                    // Include map ID to distinguish exits with the same location name
+                                    if (!String.IsNullOrEmpty(destName) && destName != destMap.ToString())
+                                        doorInfo = $"Door to {destName} (Map {destMap})";
+                                    else
+                                        doorInfo = $"Exit to area {destMap}";
+                                    hasDoor = true;
+                                    Log.Message("[AccessibleNavigation]   Set doorInfo='{0}' (first MAPJUMP)", doorInfo);
+                                }
                                 else
-                                    doorInfo = $"Exit to area {destMap}";
-                                hasDoor = true;
-                                Log.Message("[AccessibleNavigation]   Set doorInfo='{0}'", doorInfo);
+                                {
+                                    Log.Message("[AccessibleNavigation]   Ignoring additional MAPJUMP (already have door info)");
+                                }
                             }
                             else
                             {
@@ -806,7 +808,7 @@ namespace Memoria.Accessibility
                 return;
             }
 
-            string announcement = String.Format("{0} objects nearby. Use page up and page down to cycle, home to walk to selected, quote to rescan.", _nearbyObjects.Count);
+            string announcement = String.Format("{0} objects", _nearbyObjects.Count);
             Log.Message("[AccessibleNavigation] Announcing: {0}", announcement);
             ScreenReaderManager.Instance.Speak(announcement, false);
 
@@ -831,14 +833,8 @@ namespace Memoria.Accessibility
             InteractiveObject obj = _nearbyObjects[_currentSelection];
             string distanceDesc = GetDistanceDescription(obj.distance);
 
-            // Build status string
-            string status = "";
-            if (obj.isInInteractionRange)
-                status = "ready to interact, ";
-            else if (obj.showsIcon)
-                status = "interaction available, ";
-
-            string announcement = $"{_currentSelection + 1} of {_nearbyObjects.Count}: {obj.name}, {status}{obj.type}, {obj.clockDirection} o'clock, {distanceDesc}";
+            // Format: "1 of 5: Puck, NPC, 3 o'clock, very close"
+            string announcement = $"{_currentSelection + 1} of {_nearbyObjects.Count}: {obj.name}, {obj.type}, {obj.clockDirection} o'clock, {distanceDesc}";
             Log.Message("[AccessibleNavigation]   Announcing: {0}", announcement);
             ScreenReaderManager.Instance.Speak(announcement, true);
         }
@@ -862,6 +858,167 @@ namespace Memoria.Accessibility
             Log.Message("[AccessibleNavigation] ForceRescan called");
             ScreenReaderManager.Instance.Speak("Rescanning", true);
             ScanNearbyObjects();
+        }
+
+        private void DumpAllObjects()
+        {
+            if (_playerController == null)
+            {
+                ScreenReaderManager.Instance.Speak("Cannot dump - player not found", false);
+                return;
+            }
+
+            EventEngine eventEngine = PersistenSingleton<EventEngine>.Instance;
+            if (eventEngine == null)
+            {
+                ScreenReaderManager.Instance.Speak("Cannot dump - event engine not found", false);
+                return;
+            }
+
+            Vector3 playerPos = _playerController.curPos;
+            int currentMapId = FF9StateSystem.Common.FF9.fldMapNo;
+            string areaName = FF9StateSystem.Common.FF9.mapNameStr;
+
+            Log.Message("===== F9 DEBUG DUMP - ALL VISIBLE OBJECTS =====");
+            Log.Message("Map ID: {0} ({1})", currentMapId, areaName ?? "unknown");
+            Log.Message("Player position: {0}", playerPos);
+            Log.Message("");
+
+            int totalVisible = 0;
+            int actorCount = 0;
+            int quadCount = 0;
+            int otherCount = 0;
+
+            // First pass - count and categorize
+            for (ObjList objList = eventEngine.GetActiveObjList(); objList != null; objList = objList.next)
+            {
+                Obj obj = objList.obj;
+                if (obj == null || (obj.flags & EventEngine.flagShow) == 0)
+                    continue;
+
+                totalVisible++;
+                if (obj.cid == EventEngine.classActor)
+                    actorCount++;
+                else if (obj.cid == EventEngine.classQuad)
+                    quadCount++;
+                else
+                    otherCount++;
+            }
+
+            Log.Message("SUMMARY: {0} visible objects ({1} actors, {2} quads, {3} other)",
+                totalVisible, actorCount, quadCount, otherCount);
+            Log.Message("");
+
+            // Second pass - detailed dump
+            int index = 0;
+            for (ObjList objList = eventEngine.GetActiveObjList(); objList != null; objList = objList.next)
+            {
+                Obj obj = objList.obj;
+                if (obj == null || (obj.flags & EventEngine.flagShow) == 0)
+                    continue;
+
+                index++;
+
+                if (obj.cid == EventEngine.classActor)
+                {
+                    Actor actor = obj as Actor;
+                    if (actor == null) continue;
+
+                    Vector3 objPos = new Vector3(actor.pos[0], actor.pos[1], actor.pos[2]);
+                    float distance = (objPos - playerPos).magnitude;
+
+                    bool hasTalk = eventEngine.GetIP((int)actor.sid, EventEngine.tagTalk, actor.ebData) != eventEngine.nil;
+                    bool hasPush = eventEngine.GetIP((int)actor.sid, EventEngine.tagPush, actor.ebData) != eventEngine.nil;
+                    bool hasDuel = eventEngine.GetIP((int)actor.sid, 8, actor.ebData) != eventEngine.nil;
+                    bool wouldShowIcon = (hasTalk || hasPush || hasDuel) && actor.level > 1;
+                    bool isPartyMember = actor.sid >= eventEngine.sSourceObjN - 9;
+
+                    string goName = actor.go != null ? actor.go.name : "null";
+                    string objType = GetObjectType(actor, eventEngine);
+                    string objName = GetObjectName(actor, eventEngine);
+
+                    // Test pathfinding (always test, even if icon shows)
+                    bool canReach = TestPathfinding(objPos);
+                    string reachStatus = canReach ? "REACHABLE" : "UNREACHABLE";
+
+                    Log.Message("[{0}] ACTOR: {1} ({2})", index, objName, objType);
+                    Log.Message("    SID={0} UID={1} Model={2} Level={3} Flags={4}",
+                        actor.sid, actor.uid, actor.model, actor.level, actor.flags);
+                    Log.Message("    Position={0} Distance={1:F0} {2}", objPos, distance, reachStatus);
+                    Log.Message("    Events: Talk={0} Push={1} Duel={2} ShowIcon={3} Party={4}",
+                        hasTalk, hasPush, hasDuel, wouldShowIcon, isPartyMember);
+                    Log.Message("    GameObject={0}", goName);
+                    Log.Message("");
+                }
+                else if (obj.cid == EventEngine.classQuad)
+                {
+                    Quad quad = obj as Quad;
+                    if (quad == null || quad.q == null || quad.q.Length == 0) continue;
+
+                    // Calculate center
+                    Vector3 objPos = Vector3.zero;
+                    for (int i = 0; i < quad.n && i < quad.q.Length; i++)
+                    {
+                        objPos += quad.q[i].Vector3Val;
+                    }
+                    objPos /= quad.n;
+                    float distance = (objPos - playerPos).magnitude;
+
+                    // Check ALL event tags, not just Talk/Push
+                    bool hasInit = eventEngine.GetIP((int)quad.sid, EventEngine.tagInit, quad.ebData) != eventEngine.nil;
+                    bool hasDefault = eventEngine.GetIP((int)quad.sid, EventEngine.tagDefault, quad.ebData) != eventEngine.nil;
+                    bool hasPush = eventEngine.GetIP((int)quad.sid, EventEngine.tagPush, quad.ebData) != eventEngine.nil;
+                    bool hasTalk = eventEngine.GetIP((int)quad.sid, EventEngine.tagTalk, quad.ebData) != eventEngine.nil;
+                    bool hasRefresh = eventEngine.GetIP((int)quad.sid, EventEngine.tagRefresh, quad.ebData) != eventEngine.nil;
+                    bool hasTurn = eventEngine.GetIP((int)quad.sid, EventEngine.tagTurn, quad.ebData) != eventEngine.nil;
+                    bool hasCounter = eventEngine.GetIP((int)quad.sid, EventEngine.tagCounter, quad.ebData) != eventEngine.nil;
+                    bool hasReaction = eventEngine.GetIP((int)quad.sid, EventEngine.tagReaction, quad.ebData) != eventEngine.nil;
+
+                    bool wouldShowIcon = (hasTalk || hasPush) && quad.level > 1;
+                    bool hasAnyEvent = hasInit || hasDefault || hasPush || hasTalk || hasRefresh || hasTurn || hasCounter || hasReaction;
+
+                    string goName = quad.go != null ? quad.go.name : "null";
+
+                    // Analyze script
+                    string scriptInfo = null;
+                    if (hasPush)
+                        scriptInfo = AnalyzeEventScript(quad, EventEngine.tagPush, eventEngine);
+                    else if (hasTalk)
+                        scriptInfo = AnalyzeEventScript(quad, EventEngine.tagTalk, eventEngine);
+                    else if (hasDefault)
+                        scriptInfo = AnalyzeEventScript(quad, EventEngine.tagDefault, eventEngine);
+
+                    string quadName = scriptInfo ?? goName ?? ("Quad " + quad.uid);
+
+                    // Test pathfinding (always test, even if icon shows)
+                    bool canReach = TestPathfinding(objPos);
+                    string reachStatus = canReach ? "REACHABLE" : "UNREACHABLE";
+
+                    Log.Message("[{0}] QUAD: {1}", index, quadName);
+                    Log.Message("    SID={0} UID={1} Level={2} Flags={3}",
+                        quad.sid, quad.uid, quad.level, quad.flags);
+                    Log.Message("    Position={0} Distance={1:F0} {2}", objPos, distance, reachStatus);
+                    Log.Message("    Events: Init={0} Default={1} Push={2} Talk={3} Refresh={4} Turn={5} Counter={6} Reaction={7}",
+                        hasInit, hasDefault, hasPush, hasTalk, hasRefresh, hasTurn, hasCounter, hasReaction);
+                    Log.Message("    ShowIcon={0} HasAnyEvent={1}", wouldShowIcon, hasAnyEvent);
+                    Log.Message("    GameObject={0}", goName);
+                    if (!String.IsNullOrEmpty(scriptInfo))
+                        Log.Message("    Script: {0}", scriptInfo);
+                    Log.Message("");
+                }
+                else
+                {
+                    string goName = obj.go != null ? obj.go.name : "null";
+                    Log.Message("[{0}] OTHER: CID={1} SID={2} UID={3} Flags={4} GO={5}",
+                        index, obj.cid, obj.sid, obj.uid, obj.flags, goName);
+                    Log.Message("");
+                }
+            }
+
+            Log.Message("===== END DEBUG DUMP =====");
+            Log.Message("");
+
+            ScreenReaderManager.Instance.Speak(String.Format("Dumped {0} visible objects to log", totalVisible), false);
         }
 
         private void CyclePrevious()
@@ -923,6 +1080,7 @@ namespace Memoria.Accessibility
             InteractiveObject selectedObj = _nearbyObjects[_currentSelection];
 
             // Calculate path using game's pathfinding
+            // This will automatically avoid paths that go through door triggers when possible
             if (!CalculatePath(selectedObj.position))
             {
                 ScreenReaderManager.Instance.Speak("Cannot find path to target", false);
@@ -935,9 +1093,80 @@ namespace Memoria.Accessibility
 
             // Give directional guidance to first waypoint
             string direction = GetWaypointGuidance();
-            string announcement = String.Format("Navigate to {0}. {1}", selectedObj.name, direction);
+            string announcement = String.Format("{0}. {1}", selectedObj.name, direction);
             Log.Message("[AccessibleNavigation] Path has {0} waypoints. {1}", _pathWaypoints.Count, announcement);
             ScreenReaderManager.Instance.Speak(announcement, false);
+        }
+
+        private void TeleportToSelectedObject()
+        {
+            if (_currentSelection < 0 || _currentSelection >= _nearbyObjects.Count)
+            {
+                ScreenReaderManager.Instance.Speak("No object selected", false);
+                return;
+            }
+
+            if (_playerController == null)
+            {
+                ScreenReaderManager.Instance.Speak("Cannot navigate - player not found", false);
+                return;
+            }
+
+            InteractiveObject selectedObj = _nearbyObjects[_currentSelection];
+
+            // Find walkable triangle near the target
+            WalkMesh walkMesh = _playerController.walkMesh;
+            if (walkMesh == null)
+            {
+                Log.Warning("[AccessibleNavigation] No walkmesh available");
+                ScreenReaderManager.Instance.Speak("Cannot teleport - no walkable area", false);
+                return;
+            }
+
+            int targetTriIdx = FindNearbyWalkableTriangle(selectedObj.position);
+            if (targetTriIdx == -1)
+            {
+                ScreenReaderManager.Instance.Speak("Cannot find walkable area near target", false);
+                return;
+            }
+
+            WalkMeshTriangle targetTri = walkMesh.tris[targetTriIdx];
+
+            // Calculate teleport position
+            // For interaction, we need to be within ~100-150 units of the target
+            // Let's teleport to a position 80 units away from the target toward the player's current direction
+            Vector3 playerPos = _playerController.curPos;
+            Vector3 targetPos = selectedObj.position;
+
+            Vector3 directionToPlayer = (playerPos - targetPos);
+            directionToPlayer.y = 0; // Only consider horizontal direction
+
+            Vector3 teleportPos;
+            if (directionToPlayer.magnitude > 0.1f)
+            {
+                // Teleport 80 units away from target in the direction of the player
+                directionToPlayer.Normalize();
+                teleportPos = new Vector3(
+                    targetPos.x + directionToPlayer.x * 80f,
+                    targetTri.originalCenter.y,
+                    targetPos.z + directionToPlayer.z * 80f
+                );
+            }
+            else
+            {
+                // Player is at target, just use target position
+                teleportPos = new Vector3(targetPos.x, targetTri.originalCenter.y, targetPos.z);
+            }
+
+            Log.Message("[AccessibleNavigation] Teleporting to {0} at ({1:F0}, {2:F0}, {3:F0}), distance from target: {4:F0}",
+                selectedObj.name, teleportPos.x, teleportPos.y, teleportPos.z,
+                Vector3.Distance(new Vector3(targetPos.x, 0, targetPos.z), new Vector3(teleportPos.x, 0, teleportPos.z)));
+
+            // Use SetPosition to teleport
+            _playerController.SetPosition(teleportPos, true, true);
+            _playerController.ClearMoveTarget();
+
+            ScreenReaderManager.Instance.Speak(String.Format("Teleported to {0}", selectedObj.name), false);
         }
 
         private void ToggleNavigationGuidance()
@@ -959,23 +1188,106 @@ namespace Memoria.Accessibility
             }
         }
 
+        private int FindNearbyWalkableTriangle(Vector3 targetPos)
+        {
+            // Try the exact position first
+            int triIdx = _playerController.GetActiveTriIdxAtPos(targetPos);
+            if (triIdx != -1)
+                return triIdx;
+
+            // Object's exact position isn't on walkmesh
+            // Find the closest walkable triangle, preferring triangles on the same floor (similar Y)
+            WalkMesh walkMesh = _playerController.walkMesh;
+            if (walkMesh == null || walkMesh.tris == null)
+                return -1;
+
+            Vector3 playerPos = _playerController.curPos;
+            float maxFloorDifference = 500f; // Triangles more than 500 units vertically away are probably different floors
+
+            float closestDist = float.MaxValue;
+            int closestTriIdx = -1;
+            float closestFallbackDist = float.MaxValue;
+            int closestFallbackTriIdx = -1;
+
+            // Flatten target position to XZ plane for horizontal distance
+            Vector3 target2D = new Vector3(targetPos.x, 0, targetPos.z);
+
+            for (int i = 0; i < walkMesh.tris.Count; i++)
+            {
+                WalkMeshTriangle tri = walkMesh.tris[i];
+
+                // Skip inactive triangles
+                if ((tri.triFlags & 1) == 0)
+                    continue;
+
+                // Calculate horizontal (XZ) distance
+                Vector3 triCenter2D = new Vector3(tri.originalCenter.x, 0, tri.originalCenter.z);
+                float horizontalDist = Vector3.Distance(triCenter2D, target2D);
+
+                // Calculate vertical distance from player (to prefer same floor)
+                float verticalDist = Mathf.Abs(tri.originalCenter.y - playerPos.y);
+
+                // Primary search: triangles on the same floor as the player
+                if (verticalDist <= maxFloorDifference)
+                {
+                    if (horizontalDist < closestDist)
+                    {
+                        closestDist = horizontalDist;
+                        closestTriIdx = i;
+                    }
+                }
+
+                // Fallback: any triangle (for when target is genuinely on another floor)
+                if (horizontalDist < closestFallbackDist)
+                {
+                    closestFallbackDist = horizontalDist;
+                    closestFallbackTriIdx = i;
+                }
+            }
+
+            // Prefer triangles on the same floor
+            if (closestTriIdx != -1)
+            {
+                WalkMeshTriangle tri = walkMesh.tris[closestTriIdx];
+                Log.Message("[AccessibleNavigation] Found walkable triangle on same floor: horizontal_dist={0:F0}, playerY={1:F0}, triY={2:F0}",
+                    closestDist, playerPos.y, tri.originalCenter.y);
+                return closestTriIdx;
+            }
+
+            // Fall back to any triangle if nothing on the same floor
+            if (closestFallbackTriIdx != -1)
+            {
+                WalkMeshTriangle tri = walkMesh.tris[closestFallbackTriIdx];
+                Log.Message("[AccessibleNavigation] No triangle on same floor, using nearest: horizontal_dist={0:F0}, playerY={1:F0}, triY={2:F0} (DIFFERENT FLOOR!)",
+                    closestFallbackDist, playerPos.y, tri.originalCenter.y);
+                return closestFallbackTriIdx;
+            }
+
+            Log.Message("[AccessibleNavigation] No walkable triangles found");
+            return -1;
+        }
+
         private bool TestPathfinding(Vector3 targetPos)
         {
-            // Quick test if we can reach the target - don't store the path
             WalkMesh walkMesh = _playerController.walkMesh;
             if (walkMesh == null)
                 return false;
 
-            int targetTriIdx = _playerController.GetActiveTriIdxAtPos(targetPos);
+            // Find a walkable triangle near the target (using horizontal distance)
+            int targetTriIdx = FindNearbyWalkableTriangle(targetPos);
             if (targetTriIdx == -1)
-                return false; // Not on walkmesh
+                return false; // Can't find any walkable triangle nearby
 
+            // Now test if we can path to that triangle
             WalkMeshTriangle targetTri = walkMesh.tris[targetTriIdx];
             WalkMeshTriangle currentTri = walkMesh.tris[_playerController.activeTri];
 
-            // Test if pathfinding succeeds
-            WalkMeshTriangle pathResult = walkMesh.FindPathReversed(targetTri, currentTri, _playerController.radius);
-            return pathResult != null;
+            // Try BOTH directions like the game does - A* can behave differently based on direction
+            WalkMeshTriangle path1 = walkMesh.FindPathReversed(targetTri, currentTri, _playerController.radius);
+            WalkMeshTriangle path2 = walkMesh.FindPathReversed(currentTri, targetTri, _playerController.radius);
+
+            // Return true if either direction found a path
+            return path1 != null || path2 != null;
         }
 
         private bool CalculatePath(Vector3 targetPos)
@@ -989,23 +1301,39 @@ namespace Memoria.Accessibility
                 return false;
             }
 
-            // Find triangle at target position
-            int targetTriIdx = _playerController.GetActiveTriIdxAtPos(targetPos);
+            // Find a walkable triangle near the target (using horizontal distance)
+            int targetTriIdx = FindNearbyWalkableTriangle(targetPos);
             if (targetTriIdx == -1)
             {
-                Log.Warning("[AccessibleNavigation] Target position not on walkmesh");
+                Log.Warning("[AccessibleNavigation] Target position not on walkmesh and no nearby walkable triangle found");
                 return false;
             }
 
             WalkMeshTriangle targetTri = walkMesh.tris[targetTriIdx];
             WalkMeshTriangle currentTri = walkMesh.tris[_playerController.activeTri];
 
-            // Use game's pathfinding
-            WalkMeshTriangle pathResult = walkMesh.FindPathReversed(targetTri, currentTri, _playerController.radius);
+            // Try BOTH directions like the game does and pick the shorter one
+            WalkMeshTriangle path1 = walkMesh.FindPathReversed(targetTri, currentTri, _playerController.radius);
+            WalkMeshTriangle path2 = walkMesh.FindPathReversed(currentTri, targetTri, _playerController.radius);
+
+            // Pick the shorter path (or whichever one exists)
+            WalkMeshTriangle pathResult = null;
+            if (path1 != null && path2 != null)
+            {
+                // Count path lengths
+                int length1 = 0, length2 = 0;
+                for (WalkMeshTriangle t = path1; t != null; t = t.next) length1++;
+                for (WalkMeshTriangle t = path2; t != null; t = t.next) length2++;
+                pathResult = (length1 <= length2) ? path1 : path2;
+            }
+            else
+            {
+                pathResult = path1 ?? path2;
+            }
 
             if (pathResult == null)
             {
-                Log.Warning("[AccessibleNavigation] No path found");
+                Log.Warning("[AccessibleNavigation] No path found to target");
                 return false;
             }
 
@@ -1018,9 +1346,11 @@ namespace Memoria.Accessibility
             }
 
             // Add final target position as last waypoint
-            _pathWaypoints.Add(targetPos);
+            // Use the target triangle's Y coordinate instead of the object's Y coordinate
+            // because quads often have Y=0 and we need the actual walkable floor height
+            Vector3 finalWaypoint = new Vector3(targetPos.x, targetTri.originalCenter.y, targetPos.z);
+            _pathWaypoints.Add(finalWaypoint);
 
-            Log.Message("[AccessibleNavigation] Path calculated with {0} waypoints", _pathWaypoints.Count);
             return _pathWaypoints.Count > 0;
         }
 
@@ -1049,9 +1379,7 @@ namespace Memoria.Accessibility
             // Convert to arrow key instructions
             string directionText = GetArrowKeyDirection(screenX, screenZ);
             string distanceText = GetDistanceDescription(distance);
-
-            Log.Message("[AccessibleNavigation] Guidance - screenX: {0}, screenZ: {1}, twist: {2}", screenX, screenZ, twist);
-            return String.Format("{0}. Distance: {1}", directionText, distanceText);
+            return String.Format("{0}, {1}", directionText, distanceText);
         }
 
         private string GetArrowKeyDirection(float x, float z)
@@ -1064,21 +1392,21 @@ namespace Memoria.Accessibility
 
             // 8-directional guidance (including diagonals)
             if (angle >= 337.5f || angle < 22.5f)
-                return "Press up arrow";
+                return "Up";
             else if (angle >= 22.5f && angle < 67.5f)
-                return "Press up and right arrows";
+                return "Up right";
             else if (angle >= 67.5f && angle < 112.5f)
-                return "Press right arrow";
+                return "Right";
             else if (angle >= 112.5f && angle < 157.5f)
-                return "Press down and right arrows";
+                return "Down right";
             else if (angle >= 157.5f && angle < 202.5f)
-                return "Press down arrow";
+                return "Down";
             else if (angle >= 202.5f && angle < 247.5f)
-                return "Press down and left arrows";
+                return "Down left";
             else if (angle >= 247.5f && angle < 292.5f)
-                return "Press left arrow";
+                return "Left";
             else // 292.5f && angle < 337.5f
-                return "Press up and left arrows";
+                return "Up left";
         }
 
         private string GetWaypointGuidance()
@@ -1089,28 +1417,25 @@ namespace Memoria.Accessibility
             Vector3 targetWaypoint = _pathWaypoints[_currentWaypointIndex];
             Vector3 playerPos = _playerController.curPos;
             Vector3 toWaypoint = targetWaypoint - playerPos;
-            float distance = toWaypoint.magnitude;
 
-            // Get direction in world space
-            Vector3 worldDirection = new Vector3(toWaypoint.x, 0, toWaypoint.z);
-            if (worldDirection.magnitude < 0.01f)
+            // Calculate horizontal (XZ) distance only
+            Vector3 toWaypoint2D = new Vector3(toWaypoint.x, 0, toWaypoint.z);
+            float horizontalDistance = toWaypoint2D.magnitude;
+
+            if (horizontalDistance < 0.01f)
                 return "At waypoint";
 
-            worldDirection.Normalize();
+            Vector3 worldDirection = toWaypoint2D.normalized;
 
             // Apply inverse twist to convert from world direction to screen direction
             float twist = FF9StateSystem.Field.twist.y;
             Quaternion inverseRotation = Quaternion.Euler(0f, -twist, 0f);
             Vector3 screenDirection = inverseRotation * worldDirection;
 
-            float screenX = screenDirection.x;
-            float screenZ = screenDirection.z;
+            string directionText = GetArrowKeyDirection(screenDirection.x, screenDirection.z);
+            string distanceText = GetDistanceDescription(horizontalDistance);
 
-            string directionText = GetArrowKeyDirection(screenX, screenZ);
-            string distanceText = GetDistanceDescription(distance);
-
-            int waypointsRemaining = _pathWaypoints.Count - _currentWaypointIndex;
-            return String.Format("{0}. Distance: {1}. {2} waypoints remaining", directionText, distanceText, waypointsRemaining);
+            return String.Format("{0}, {1}", directionText, distanceText);
         }
 
         private void UpdateTrackedTarget()
@@ -1154,7 +1479,10 @@ namespace Memoria.Accessibility
             _lastDistanceUpdate = Time.time;
 
             // Give updated guidance to current waypoint
+            Log.Message("[AccessibleNavigation] UpdateTrackedTarget: Announcing waypoint {0}/{1}",
+                _currentWaypointIndex + 1, _pathWaypoints.Count);
             string direction = GetWaypointGuidance();
+            Log.Message("[AccessibleNavigation]   -> Speaking: '{0}'", direction);
             ScreenReaderManager.Instance.Speak(direction, true);
         }
 
@@ -1170,7 +1498,7 @@ namespace Memoria.Accessibility
 
             if (toTarget == Vector3.zero)
             {
-                ScreenReaderManager.Instance.Speak(String.Format("Arrived at {0}. Press confirm to interact.", _trackedTarget.name), false);
+                ScreenReaderManager.Instance.Speak(_trackedTarget.name, false);
                 _trackedTarget = null;
                 _pathWaypoints.Clear();
                 return;
@@ -1197,7 +1525,7 @@ namespace Memoria.Accessibility
             // Check if within interaction angle (-1024 to 1024, roughly ±90 degrees)
             if (fixedPointAngle > -1024 && fixedPointAngle < 1024)
             {
-                ScreenReaderManager.Instance.Speak(String.Format("Arrived at {0}. Press confirm to interact.", _trackedTarget.name), false);
+                ScreenReaderManager.Instance.Speak(_trackedTarget.name, false);
                 _trackedTarget = null;
                 _pathWaypoints.Clear();
             }
@@ -1210,7 +1538,7 @@ namespace Memoria.Accessibility
                 else
                     turnDirection = angleDiff < -45f ? "Turn left" : "Turn slightly left";
 
-                ScreenReaderManager.Instance.Speak(String.Format("Near {0}. {1} to face them, then press confirm.", _trackedTarget.name, turnDirection), false);
+                ScreenReaderManager.Instance.Speak(String.Format("{0}. {1}", _trackedTarget.name, turnDirection), false);
             }
         }
     }
