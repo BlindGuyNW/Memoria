@@ -6,6 +6,7 @@ using Memoria.Data;
 using Memoria.Database;
 using Memoria.Prime;
 using Memoria.Scenes;
+using Memoria.ScreenReader;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -662,6 +663,21 @@ public partial class BattleHUD : UIScene
         // ATB bar is full
         ReadyQueue.Add(playerId);
         _partyDetail.GetCharacter(playerId).ATBBlink = true;
+
+        // Announce character's turn to screen reader
+        try
+        {
+            BattleUnit unit = FF9StateSystem.Battle.FF9Battle.GetUnit(playerId);
+            if (unit != null && unit.IsPlayer)
+            {
+                String cleanName = BattleFormatter.GetKey(unit.Name);
+                ScreenReaderManager.Instance.Speak(cleanName + "'s turn", false);
+            }
+        }
+        catch
+        {
+            // Silently fail if screen reader isn't available
+        }
     }
 
     public void RemovePlayerFromAction(Int32 btlId, Boolean isNeedToClearCommand)

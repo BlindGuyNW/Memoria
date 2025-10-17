@@ -1,4 +1,5 @@
 using FF9;
+using Memoria.Assets;
 using Memoria.Data;
 using Memoria.Prime;
 using Memoria.ScreenReader;
@@ -313,7 +314,9 @@ namespace Memoria
             try
             {
                 BattleUnit targetUnit = new BattleUnit(target);
-                String announcement = targetUnit.Name + ": ";
+                // Strip FF9 formatting tags for screen reader (e.g., [STRT=67,1], [ENDN], color codes)
+                String cleanName = BattleFormatter.GetKey(targetUnit.Name);
+                String announcement = cleanName + ": ";
 
                 if (v.Command.Data.info.dodge == 1 || (v.Context.Flags & BattleCalcFlags.Dodge) != 0)
                 {
@@ -346,7 +349,7 @@ namespace Memoria
                     }
                 }
 
-                if (announcement.Length > targetUnit.Name.Length + 2)
+                if (announcement.Length > cleanName.Length + 2)
                     ScreenReaderManager.Instance.Speak(announcement, false);
             }
             catch
