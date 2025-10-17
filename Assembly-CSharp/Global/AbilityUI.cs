@@ -6,6 +6,7 @@ using Memoria;
 using Memoria.Assets;
 using Memoria.Data;
 using Memoria.Database;
+using Memoria.Prime;
 using Memoria.Scenes;
 using System;
 using System.Collections.Generic;
@@ -843,6 +844,146 @@ public class AbilityUI : UIScene
             this.SetAbilityInfo(true);
         }
         return true;
+    }
+
+    protected override String GetButtonText(GameObject go)
+    {
+        try
+        {
+            // Check which submenu/ability list is active
+            if (ButtonGroupState.ActiveGroup == SubMenuGroupButton)
+            {
+                // Announce submenu selection (Use/Equip)
+                if (go == this.UseSubMenu)
+                    return "Use abilities";
+                else if (go == this.EquipSubMenu)
+                {
+                    PLAYER player = FF9StateSystem.Common.FF9.party.member[this.currentPartyIndex];
+                    return String.Format("Equip abilities. Magic stones: {0} of {1} available",
+                        player.cur.capa,
+                        player.max.capa == UInt32.MaxValue ? "infinite" : player.max.capa.ToString());
+                }
+            }
+            else if (ButtonGroupState.ActiveGroup == ActionAbilityGroupButton)
+            {
+                // Get the index from the GameObject (currentAbilityIndex hasn't been updated yet at this point)
+                RecycleListItem listItem = go.GetComponent<RecycleListItem>();
+                if (listItem == null)
+                    return base.GetButtonText(go);
+
+                Int32 abilityIndex = listItem.ItemDataIndex;
+                if (abilityIndex < 0 || abilityIndex >= this.aaIdList.Count)
+                    return null;
+
+                PLAYER player = FF9StateSystem.Common.FF9.party.member[this.currentPartyIndex];
+                Int32 abilId = this.aaIdList[abilityIndex];
+                AbilityType type = this.CheckAAType(abilId, player);
+
+                // Don't announce disabled/empty ability slots
+                if (type == AbilityType.NoDraw)
+                    return null;
+
+                BattleAbilityId patchedId = this.PatchAbility(ff9abil.GetActiveAbilityFromAbilityId(abilId));
+                AA_DATA abilData = FF9StateSystem.Battle.FF9Battle.aa_data[patchedId];
+                Int32 mpCost = GetMp(abilData);
+                String abilityName = FF9TextTool.ActionAbilityName(patchedId);
+                String description = FF9TextTool.ActionAbilityHelpDescription(patchedId);
+
+                String announcement = abilityName;
+                if (mpCost > 0)
+                    announcement += String.Format(", MP cost {0}", mpCost);
+
+                // Announce status
+                if (type == AbilityType.CantSpell)
+                {
+                    if (mpCost > player.cur.mp)
+                        announcement += ", not enough MP";
+                    else
+                        announcement += ", cannot use";
+                }
+
+                // Add description (strip formatting codes)
+                if (!String.IsNullOrEmpty(description))
+                    announcement += ". " + FF9TextTool.RemoveOpCode(description);
+
+                return announcement;
+            }
+            else if (ButtonGroupState.ActiveGroup == SupportAbilityGroupButton)
+            {
+                // Get the index from the GameObject (currentAbilityIndex hasn't been updated yet at this point)
+                RecycleListItem listItem = go.GetComponent<RecycleListItem>();
+                if (listItem == null)
+                    return base.GetButtonText(go);
+
+                Int32 abilityIndex = listItem.ItemDataIndex;
+                if (abilityIndex < 0 || abilityIndex >= this.saIdList.Count)
+                    return null;
+
+                PLAYER player = FF9StateSystem.Common.FF9.party.member[this.currentPartyIndex];
+                Int32 abilId = this.saIdList[abilityIndex];
+                AbilityType type = this.CheckSAType(abilId, player);
+
+                // Don't announce disabled/empty ability slots
+                if (type == AbilityType.NoDraw)
+                    return null;
+
+                SupportAbility supportId = ff9abil.GetSupportAbilityFromAbilityId(abilId);
+                String abilityName = FF9TextTool.SupportAbilityName(supportId);
+                Int32 gemCost = ff9abil.GetSAGemCostFromPlayer(player, supportId);
+                String description = FF9TextTool.SupportAbilityHelpDescription(supportId);
+
+                // Check for boosted abilities (multiple levels)
+                Int32 maxLevel = ff9abil.GetBoostedAbilityMaxLevel(player, supportId);
+                if (maxLevel > 0 && (type == AbilityType.Selected || type == AbilityType.CantDisable))
+                {
+                    List<SupportAbility> boostedList = ff9abil.GetBoostedAbilityList(supportId);
+                    Int32 level = Math.Min(maxLevel, ff9abil.GetBoostedAbilityLevel(player, supportId));
+                    Int32 totalCost = ff9abil.GetSAGemCostFromPlayer(player, supportId);
+                    for (Int32 i = 0; i < level; i++)
+                        totalCost += ff9abil.GetSAGemCostFromPlayer(player, boostedList[i]);
+                    if (level > 0)
+                    {
+                        supportId = boostedList[level - 1];
+                        abilityName = FF9TextTool.SupportAbilityName(supportId);
+                        description = FF9TextTool.SupportAbilityHelpDescription(supportId);
+                        gemCost = totalCost;
+                    }
+                }
+
+                String announcement = abilityName;
+                announcement += String.Format(", {0} magic stone{1}", gemCost, gemCost == 1 ? "" : "s");
+
+                // Announce equip status
+                if (type == AbilityType.Selected)
+                    announcement += ", equipped";
+                else if (type == AbilityType.CantDisable)
+                    announcement += ", equipped, cannot unequip";
+                else if (type == AbilityType.CantSpell)
+                {
+                    if (gemCost > player.cur.capa)
+                        announcement += ", not enough magic stones";
+                    else
+                        announcement += ", cannot equip";
+                }
+                else if (type == AbilityType.Enable)
+                    announcement += ", not equipped";
+
+                // Add description (strip formatting codes)
+                if (!String.IsNullOrEmpty(description))
+                    announcement += ". " + FF9TextTool.RemoveOpCode(description);
+
+                return announcement;
+            }
+
+            // Fall back to base implementation for other buttons
+            return base.GetButtonText(go);
+        }
+        catch (Exception e)
+        {
+            // Log error but don't crash - fall back to base implementation
+            Log.Error("AbilityUI.GetButtonText failed: " + e.Message);
+            return base.GetButtonText(go);
+        }
     }
 
     private void OnAllTargetClick(GameObject go)
