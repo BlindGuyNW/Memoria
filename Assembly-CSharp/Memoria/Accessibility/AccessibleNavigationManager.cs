@@ -22,6 +22,7 @@ namespace Memoria.Accessibility
         private List<Vector3> _pathWaypoints = new List<Vector3>();
         private int _currentWaypointIndex = 0;
         private int _currentMapId = -1;
+        private bool _useDirectNavigation = false; // True when waypoint path failed, use compass guidance instead
 
         public class InteractiveObject
         {
@@ -1089,11 +1090,24 @@ namespace Memoria.Accessibility
             _lastDistanceUpdate = Time.time;
             _currentWaypointIndex = 0;
 
-            // Give directional guidance to first waypoint
-            string direction = GetWaypointGuidance();
-            string announcement = String.Format("{0}. {1}", selectedObj.name, direction);
-            Log.Message("[AccessibleNavigation] Path has {0} waypoints. {1}", _pathWaypoints.Count, announcement);
-            ScreenReaderManager.Instance.Speak(announcement, false);
+            // Give appropriate guidance based on navigation mode
+            string guidance;
+            if (_useDirectNavigation)
+            {
+                // Direct navigation mode - give compass direction
+                guidance = GetDirectNavigationGuidance();
+                string announcement = String.Format("Navigating to {0}. {1}", selectedObj.name, guidance);
+                Log.Message("[AccessibleNavigation] Using direct navigation: {0}", announcement);
+                ScreenReaderManager.Instance.Speak(announcement, false);
+            }
+            else
+            {
+                // Waypoint navigation mode - give waypoint guidance
+                guidance = GetWaypointGuidance();
+                string announcement = String.Format("{0}. {1}", selectedObj.name, guidance);
+                Log.Message("[AccessibleNavigation] Path has {0} waypoints. {1}", _pathWaypoints.Count, announcement);
+                ScreenReaderManager.Instance.Speak(announcement, false);
+            }
         }
 
         private void TeleportToSelectedObject()
@@ -1177,6 +1191,7 @@ namespace Memoria.Accessibility
                 _trackedTarget = null;
                 _pathWaypoints.Clear();
                 _currentWaypointIndex = 0;
+                _useDirectNavigation = false;
             }
             // Otherwise, start navigation
             else
@@ -1265,6 +1280,58 @@ namespace Memoria.Accessibility
             return -1;
         }
 
+        /// <summary>
+        /// Validates that a path doesn't have unreasonable jumps between consecutive waypoints.
+        /// This catches "teleport" edges in the walkmesh (like entrance/exit pairs) that are
+        /// marked as neighbors but are physically far apart.
+        /// </summary>
+        private bool ValidatePathWaypoints(WalkMeshTriangle path, Vector3 targetPos)
+        {
+            if (path == null)
+                return false;
+
+            // Maximum horizontal distance allowed between consecutive waypoints
+            // If two waypoints are further apart than this, it's likely a teleport edge
+            const float MAX_WAYPOINT_JUMP = 1500f;
+
+            WalkMeshTriangle current = path;
+            Vector3 prevPos = current.originalCenter;
+
+            while (current.next != null)
+            {
+                current = current.next;
+                Vector3 currentPos = current.originalCenter;
+
+                // Calculate horizontal (XZ plane) distance between consecutive waypoints
+                Vector3 prevPos2D = new Vector3(prevPos.x, 0, prevPos.z);
+                Vector3 currentPos2D = new Vector3(currentPos.x, 0, currentPos.z);
+                float jumpDist = Vector3.Distance(prevPos2D, currentPos2D);
+
+                if (jumpDist > MAX_WAYPOINT_JUMP)
+                {
+                    Log.Message("[AccessibleNavigation] Invalid path edge: {0:F0} units between waypoints (max {1:F0})",
+                        jumpDist, MAX_WAYPOINT_JUMP);
+                    return false;
+                }
+
+                prevPos = currentPos;
+            }
+
+            // Also check the final jump to the target position
+            Vector3 lastPos2D = new Vector3(prevPos.x, 0, prevPos.z);
+            Vector3 targetPos2D = new Vector3(targetPos.x, 0, targetPos.z);
+            float finalJumpDist = Vector3.Distance(lastPos2D, targetPos2D);
+
+            if (finalJumpDist > MAX_WAYPOINT_JUMP)
+            {
+                Log.Message("[AccessibleNavigation] Invalid final path edge: {0:F0} units to target (max {1:F0})",
+                    finalJumpDist, MAX_WAYPOINT_JUMP);
+                return false;
+            }
+
+            return true;
+        }
+
         private bool TestPathfinding(Vector3 targetPos)
         {
             WalkMesh walkMesh = _playerController.walkMesh;
@@ -1284,8 +1351,23 @@ namespace Memoria.Accessibility
             WalkMeshTriangle path1 = walkMesh.FindPathReversed(targetTri, currentTri, _playerController.radius);
             WalkMeshTriangle path2 = walkMesh.FindPathReversed(currentTri, targetTri, _playerController.radius);
 
-            // Return true if either direction found a path
-            return path1 != null || path2 != null;
+            if (path1 != null || path2 != null)
+            {
+                // Found a path, validate it doesn't have unreasonable jumps between waypoints
+                WalkMeshTriangle path = path1 ?? path2;
+
+                // Validate consecutive waypoints aren't too far apart (no teleport edges)
+                if (!ValidatePathWaypoints(path, targetPos))
+                {
+                    Log.Message("[AccessibleNavigation] Path validation failed - has unreasonable jumps between waypoints");
+                    return false;
+                }
+
+                Log.Message("[AccessibleNavigation] Path is valid");
+                return true;
+            }
+
+            return false;
         }
 
         private bool CalculatePath(Vector3 targetPos)
@@ -1349,6 +1431,16 @@ namespace Memoria.Accessibility
             Vector3 finalWaypoint = new Vector3(targetPos.x, targetTri.originalCenter.y, targetPos.z);
             _pathWaypoints.Add(finalWaypoint);
 
+            // Validate the path doesn't have unreasonable jumps between waypoints
+            if (!ValidatePathWaypoints(pathResult, targetPos))
+            {
+                Log.Message("[AccessibleNavigation] Path has unreasonable jumps - falling back to direct navigation");
+                _pathWaypoints.Clear();
+                _useDirectNavigation = true; // Use compass-style guidance instead
+                return true; // Still allow navigation, just use direct mode
+            }
+
+            _useDirectNavigation = false; // We have a valid waypoint path
             return _pathWaypoints.Count > 0;
         }
 
@@ -1407,6 +1499,39 @@ namespace Memoria.Accessibility
                 return "Up left";
         }
 
+        /// <summary>
+        /// Provides direct compass-style navigation guidance (like world map).
+        /// Returns format: "distance direction" (e.g., "500 up-right")
+        /// </summary>
+        private string GetDirectNavigationGuidance()
+        {
+            if (_trackedTarget == null || _playerController == null)
+                return "Navigation error";
+
+            Vector3 playerPos = _playerController.curPos;
+            Vector3 targetPos = _trackedTarget.position;
+            Vector3 toTarget = targetPos - playerPos;
+
+            // Calculate horizontal (XZ) distance only
+            Vector3 toTarget2D = new Vector3(toTarget.x, 0, toTarget.z);
+            float distance = toTarget2D.magnitude;
+
+            if (distance < 0.01f)
+                return "At destination";
+
+            Vector3 worldDirection = toTarget2D.normalized;
+
+            // Apply inverse twist to convert from world direction to screen direction
+            float twist = FF9StateSystem.Field.twist.y;
+            Quaternion inverseRotation = Quaternion.Euler(0f, -twist, 0f);
+            Vector3 screenDirection = inverseRotation * worldDirection;
+
+            string directionText = GetArrowKeyDirection(screenDirection.x, screenDirection.z);
+
+            // Return concise format: "500 up-right" (similar to world map "500 northeast")
+            return String.Format("{0:F0} {1}", distance, directionText.ToLower().Replace(" ", "-"));
+        }
+
         private string GetWaypointGuidance()
         {
             if (_currentWaypointIndex >= _pathWaypoints.Count)
@@ -1441,6 +1566,37 @@ namespace Memoria.Accessibility
             if (_trackedTarget == null || _playerController == null)
                 return;
 
+            // Direct navigation mode - use compass guidance
+            if (_useDirectNavigation)
+            {
+                // Check if we're close enough
+                Vector3 toTarget = _trackedTarget.position - _playerController.curPos;
+                Vector3 toTarget2D = new Vector3(toTarget.x, 0, toTarget.z);
+                float distance = toTarget2D.magnitude;
+
+                if (distance < 100f)
+                {
+                    // Close enough - check facing
+                    if (Time.time - _lastDistanceUpdate < 2f)
+                        return;
+                    _lastDistanceUpdate = Time.time;
+                    CheckFacingAndAnnounce();
+                    return;
+                }
+
+                // Periodic updates - more frequent when close
+                float updateInterval = distance < 500f ? 3f : 5f;
+                if (Time.time - _lastDistanceUpdate < updateInterval)
+                    return;
+
+                _lastDistanceUpdate = Time.time;
+                string guidance = GetDirectNavigationGuidance();
+                Log.Message("[AccessibleNavigation] Direct navigation update: {0}", guidance);
+                ScreenReaderManager.Instance.Speak(guidance, true);
+                return;
+            }
+
+            // Waypoint navigation mode - use waypoint guidance
             // Check if we're at final destination (no more waypoints)
             if (_currentWaypointIndex >= _pathWaypoints.Count)
             {
@@ -1499,6 +1655,7 @@ namespace Memoria.Accessibility
                 ScreenReaderManager.Instance.Speak(_trackedTarget.name, false);
                 _trackedTarget = null;
                 _pathWaypoints.Clear();
+                _useDirectNavigation = false;
                 return;
             }
 
@@ -1526,6 +1683,7 @@ namespace Memoria.Accessibility
                 ScreenReaderManager.Instance.Speak(_trackedTarget.name, false);
                 _trackedTarget = null;
                 _pathWaypoints.Clear();
+                _useDirectNavigation = false;
             }
             else
             {
