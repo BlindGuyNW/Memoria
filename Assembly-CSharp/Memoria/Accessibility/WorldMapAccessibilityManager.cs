@@ -37,14 +37,16 @@ namespace Memoria.Accessibility
             public Vector3 position;
             public float distance;
             public int compassDirection; // 0-7 (N, NE, E, SE, S, SW, W, NW)
+            public bool isDiscovered; // Whether this location has been discovered/unlocked
 
-            public WorldDestination(int locationId, string name, Vector3 position, float distance, int compassDirection)
+            public WorldDestination(int locationId, string name, Vector3 position, float distance, int compassDirection, bool isDiscovered = true)
             {
                 this.locationId = locationId;
                 this.name = name;
                 this.position = position;
                 this.distance = distance;
                 this.compassDirection = compassDirection;
+                this.isDiscovered = isDiscovered;
             }
 
             public string CompassDirectionName
@@ -200,14 +202,17 @@ namespace Memoria.Accessibility
             for (int locationId = 0; locationId < 64; locationId++)
             {
                 // Check if location is available/discovered
-                if (!ff9.w_naviLocationAvailable(locationId))
+                // Use WMUIData.LocationAvailable() instead of ff9.w_naviLocationAvailable() directly
+                // to handle special cases like IsBeeScene where locations are available before being "discovered"
+                if (!WMUIData.LocationAvailable(locationId))
                     continue;
 
                 // Get location position data
                 ff9.navipos navPos = ff9.w_naviLocationPos[currentMapNo, locationId];
 
-                // Skip locations with no coordinates
-                if (navPos.vx == 0 && navPos.vy == 0)
+                // Skip locations with no world coordinates (tx, ty are the actual world positions)
+                // Note: vx/vy are map UI coordinates, tx/ty are world coordinates
+                if (navPos.tx == 0 && navPos.ty == 0)
                     continue;
 
                 // Get location name using the CORRECT text table (same as WorldHUD)
@@ -220,10 +225,7 @@ namespace Memoria.Accessibility
                     : null;
 
                 if (String.IsNullOrEmpty(locationName))
-                {
-                    Log.Message("[WorldMapAccessibility] Location {0} has no name, skipping", locationId);
                     continue;
-                }
 
                 // Calculate position and distance using world coordinates (tx, ty)
                 // navPos coordinates are in fixed-point format - convert using ff9.S()
@@ -248,12 +250,66 @@ namespace Memoria.Accessibility
 
                 _availableDestinations.Add(destination);
                 foundCount++;
-
-                Log.Message("[WorldMapAccessibility] Found: {0} (ID {1}) at world ({2:F1}, {3:F1}), distance {4:F0}, direction {5}",
-                    locationName, locationId, destX, destZ, distance, destination.CompassDirectionName);
             }
 
-            Log.Message("[WorldMapAccessibility] Scan complete: Found {0} available locations", foundCount);
+            // SECOND PASS: Include nearby undiscovered locations to help blind players find new areas
+            // This solves the chicken-and-egg problem where you can't discover a location without finding it,
+            // but can't find it because it's not in the list
+            const float NEARBY_RANGE = 500f; // Show undiscovered locations within 500 units
+            int undiscoveredCount = 0;
+
+            for (int locationId = 0; locationId < 64; locationId++)
+            {
+                // Skip if already added as discovered
+                if (WMUIData.LocationAvailable(locationId))
+                    continue;
+
+                ff9.navipos navPos = ff9.w_naviLocationPos[currentMapNo, locationId];
+
+                // Skip locations with no world coordinates
+                if (navPos.tx == 0 && navPos.ty == 0)
+                    continue;
+
+                // Get location name
+                int textIndex = locationId;
+                if (locationId == 63) textIndex = 49;
+                string locationName = (locationTexts != null && textIndex + 1 < locationTexts.Length)
+                    ? locationTexts[textIndex + 1]
+                    : null;
+
+                // Skip unnamed locations
+                if (String.IsNullOrEmpty(locationName))
+                    continue;
+
+                // Calculate distance
+                float destX = ff9.S(navPos.tx);
+                float destZ = ff9.S(navPos.ty);
+                Vector3 destPos = new Vector3(destX, 0, destZ);
+                Vector3 playerPos2D = new Vector3(playerPos.x, 0, playerPos.z);
+                Vector3 toDestination = destPos - playerPos2D;
+                float distance = toDestination.magnitude;
+
+                // Only include if nearby
+                if (distance > NEARBY_RANGE)
+                    continue;
+
+                int compassDir = CalculateCompassDirection(toDestination);
+
+                WorldDestination destination = new WorldDestination(
+                    locationId,
+                    locationName,
+                    destPos,
+                    distance,
+                    compassDir,
+                    false  // Mark as undiscovered
+                );
+
+                _availableDestinations.Add(destination);
+                undiscoveredCount++;
+            }
+
+            Log.Message("[WorldMapAccessibility] Scan complete: Found {0} total locations ({1} discovered, {2} nearby undiscovered)",
+                foundCount + undiscoveredCount, foundCount, undiscoveredCount);
         }
 
         private int CalculateCompassDirection(Vector3 toTarget)
@@ -332,13 +388,26 @@ namespace Memoria.Accessibility
             WorldDestination dest = _availableDestinations[_currentSelection];
             string distanceDesc = GetDistanceDescription(dest.distance);
 
-            // Format: "1 of 12: Alexandria, Southeast, close"
-            string announcement = String.Format("{0} of {1}: {2}, {3}, {4}",
-                _currentSelection + 1,
-                _availableDestinations.Count,
-                dest.name,
-                dest.CompassDirectionName,
-                distanceDesc);
+            // Format: "1 of 12: Alexandria, Southeast, close" or "1 of 12: Dali, Southwest, close, undiscovered"
+            string announcement;
+            if (dest.isDiscovered)
+            {
+                announcement = String.Format("{0} of {1}: {2}, {3}, {4}",
+                    _currentSelection + 1,
+                    _availableDestinations.Count,
+                    dest.name,
+                    dest.CompassDirectionName,
+                    distanceDesc);
+            }
+            else
+            {
+                announcement = String.Format("{0} of {1}: {2}, {3}, {4}, undiscovered",
+                    _currentSelection + 1,
+                    _availableDestinations.Count,
+                    dest.name,
+                    dest.CompassDirectionName,
+                    distanceDesc);
+            }
 
             Log.Message("[WorldMapAccessibility] Announcing: {0}", announcement);
             ScreenReaderManager.Instance.Speak(announcement, true);
@@ -352,14 +421,21 @@ namespace Memoria.Accessibility
                 return;
             }
 
+            WorldDestination dest = _availableDestinations[_currentSelection];
+
+            // Block autopilot for undiscovered locations
+            if (!dest.isDiscovered)
+            {
+                ScreenReaderManager.Instance.Speak("Cannot autopilot to undiscovered location. Use manual navigation instead.", false);
+                return;
+            }
+
             // Check if we're on an airship (autopilot only works on airship)
             if (!CheckUsingAirShip())
             {
                 ScreenReaderManager.Instance.Speak("Autopilot requires an airship", false);
                 return;
             }
-
-            WorldDestination dest = _availableDestinations[_currentSelection];
 
             // Activate the game's built-in autopilot
             ff9.w_frameAutoid = (byte)dest.locationId;
