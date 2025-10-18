@@ -3,11 +3,13 @@ using Assets.SiliconSocial;
 using Assets.Sources.Scripts.UI.Common;
 using FF9;
 using Memoria;
+using Memoria.Accessibility;
 using Memoria.Assets;
 using Memoria.Data;
 using Memoria.Database;
 using Memoria.Prime;
 using Memoria.Scenes;
+using Memoria.ScreenReader;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -973,6 +975,17 @@ public class AbilityUI : UIScene
                     announcement += ". " + FF9TextTool.RemoveOpCode(description);
 
                 return announcement;
+            }
+            else if (ButtonGroupState.ActiveGroup == TargetGroupButton)
+            {
+                // Announce character target info
+                Int32 targetIndex = go.transform.GetSiblingIndex();
+                if (targetIndex >= 0 && targetIndex < FF9StateSystem.Common.FF9.party.member.Length)
+                {
+                    PLAYER player = FF9StateSystem.Common.FF9.party.member[targetIndex];
+                    if (player != null)
+                        return CharacterAnnouncementHelper.FormatCharacterInfo(player, true);
+                }
             }
 
             // Fall back to base implementation for other buttons

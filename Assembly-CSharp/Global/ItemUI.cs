@@ -1,9 +1,12 @@
 ﻿using Assets.Scripts.Common;
 using Assets.Sources.Scripts.UI.Common;
 using Memoria;
+using Memoria.Accessibility;
 using Memoria.Assets;
 using Memoria.Data;
+using Memoria.Prime;
 using Memoria.Scenes;
+using Memoria.ScreenReader;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -602,7 +605,12 @@ public class ItemUI : UIScene
                 }
             }
         }
-        else if (ButtonGroupState.ActiveGroup == ItemGroupButton || ButtonGroupState.ActiveGroup == KeyItemGroupButton)
+        else if (ButtonGroupState.ActiveGroup == ItemGroupButton)
+        {
+            Int32 itemDataIndex = go.GetComponent<RecycleListItem>().ItemDataIndex;
+            _currentItemIndex = itemDataIndex;
+        }
+        else if (ButtonGroupState.ActiveGroup == KeyItemGroupButton)
         {
             Int32 itemDataIndex = go.GetComponent<RecycleListItem>().ItemDataIndex;
             _currentItemIndex = itemDataIndex;
@@ -953,6 +961,62 @@ public class ItemUI : UIScene
         if (go == ArrangeSubMenu)
             return SubMenu.Arrange;
         return go == KeySubMenu ? SubMenu.Key : SubMenu.None;
+    }
+
+    protected override String GetButtonText(GameObject go)
+    {
+        try
+        {
+            // Handle item list
+            if (ButtonGroupState.ActiveGroup == ItemGroupButton)
+            {
+                RecycleListItem listItem = go.GetComponent<RecycleListItem>();
+                if (listItem == null)
+                    return base.GetButtonText(go);
+
+                Int32 itemIndex = listItem.ItemDataIndex;
+                if (itemIndex >= 0 && itemIndex < _itemIdList.Count)
+                {
+                    RegularItem itemId = _itemIdList[itemIndex];
+                    Int32 itemCount = ff9item.FF9Item_GetCount(itemId);
+                    return CharacterAnnouncementHelper.FormatItemInfo(itemId, itemCount, true);
+                }
+            }
+            // Handle key item list
+            else if (ButtonGroupState.ActiveGroup == KeyItemGroupButton)
+            {
+                RecycleListItem listItem = go.GetComponent<RecycleListItem>();
+                if (listItem == null)
+                    return base.GetButtonText(go);
+
+                Int32 itemIndex = listItem.ItemDataIndex;
+                if (itemIndex >= 0 && itemIndex < _keyItemIdList.Count)
+                {
+                    Int32 keyItemId = _keyItemIdList[itemIndex];
+                    if (keyItemId != FF9FITEM_RARE_NONE)
+                        return CharacterAnnouncementHelper.FormatKeyItemInfo(keyItemId, true);
+                }
+            }
+            // Handle character target selection
+            else if (ButtonGroupState.ActiveGroup == TargetGroupButton)
+            {
+                Int32 targetIndex = go.transform.GetSiblingIndex();
+                if (targetIndex >= 0 && targetIndex < FF9StateSystem.Common.FF9.party.member.Length)
+                {
+                    PLAYER player = FF9StateSystem.Common.FF9.party.member[targetIndex];
+                    if (player != null)
+                        return CharacterAnnouncementHelper.FormatCharacterInfo(player, true);
+                }
+            }
+
+            // Fall back to base implementation
+            return base.GetButtonText(go);
+        }
+        catch (Exception e)
+        {
+            Log.Error("ItemUI.GetButtonText failed: " + e.Message);
+            return base.GetButtonText(go);
+        }
     }
 
     public Boolean FF9FItem_Vegetable()
