@@ -24,3 +24,5 @@ obj/
 /Memoria.Injection/Debug/
 /Memoria.Injection/Release/
 /Memoria.Injection/x64/
+.claude/
+build.bat

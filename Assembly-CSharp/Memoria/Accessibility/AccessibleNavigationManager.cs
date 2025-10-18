@@ -1385,8 +1385,10 @@ namespace Memoria.Accessibility
             int targetTriIdx = FindNearbyWalkableTriangle(targetPos);
             if (targetTriIdx == -1)
             {
-                Log.Warning("[AccessibleNavigation] Target position not on walkmesh and no nearby walkable triangle found");
-                return false;
+                Log.Message("[AccessibleNavigation] Target not on walkmesh - falling back to direct navigation");
+                _pathWaypoints.Clear();
+                _useDirectNavigation = true; // Use compass-style guidance instead
+                return true; // Still allow navigation, just use direct mode
             }
 
             WalkMeshTriangle targetTri = walkMesh.tris[targetTriIdx];
@@ -1413,8 +1415,10 @@ namespace Memoria.Accessibility
 
             if (pathResult == null)
             {
-                Log.Warning("[AccessibleNavigation] No path found to target");
-                return false;
+                Log.Message("[AccessibleNavigation] No path found - falling back to direct navigation");
+                _pathWaypoints.Clear();
+                _useDirectNavigation = true; // Use compass-style guidance instead
+                return true; // Still allow navigation, just use direct mode
             }
 
             // Build waypoint list from triangle centers
