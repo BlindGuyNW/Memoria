@@ -1,6 +1,7 @@
 ﻿using Assets.Scripts.Common;
 using Assets.Sources.Scripts.UI.Common;
 using Memoria;
+using Memoria.Accessibility;
 using System;
 using UnityEngine;
 using UnityStandardAssets.ImageEffects;
@@ -24,6 +25,9 @@ public class WMScriptDirector : HonoBehavior
         Single loadStartTime = Time.realtimeSinceStartup;
         global::Debug.Log("WMScriptDirector.HonoAwake(): This should be called first of all things in WorldMap, than other WM* signletons.");
         WorldConfiguration.PatchAllWorldConfig();
+
+        // Initialize world map accessibility
+        WorldMapAccessibilityManager.Instance.Initialize();
         if (!FF9StateSystem.World.IsBeeScene)
         {
             EMinigame.InitializeAllTreasureAchievement();
@@ -127,6 +131,9 @@ public class WMScriptDirector : HonoBehavior
             ff9.kPadPush.PurgeInput();
         }
         WMGizmos.DrawFrustum(Singleton<WMWorld>.Instance.MainCamera);
+
+        // Update world map accessibility
+        WorldMapAccessibilityManager.Instance.Update();
     }
 
     public void HonoUpdate20FPS()
@@ -468,6 +475,8 @@ public class WMScriptDirector : HonoBehavior
 
     public override void HonoOnDestroy()
     {
+        // Shutdown world map accessibility
+        WorldMapAccessibilityManager.Instance.Shutdown();
     }
 
     public void SetAnimationSpeeds(Single speed)

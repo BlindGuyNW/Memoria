@@ -143,14 +143,12 @@ namespace Memoria.Accessibility
                 _nearbyObjects.Clear();
                 _currentSelection = -1;
 
-                // Announce the area name
-                string areaName = FF9StateSystem.Common.FF9.mapNameStr;
-                Log.Message("[AccessibleNavigation] Area change - fldMapNo={0}, mapNameStr='{1}'", currentMap, areaName ?? "null");
+                // Announce the area name - use LocationName lookup to get the NEW area name
+                // mapNameStr can still contain the old map name at this point
+                string areaName = FF9TextTool.LocationName(currentMap);
+                Log.Message("[AccessibleNavigation] Area change - fldMapNo={0}, LocationName lookup='{1}'", currentMap, areaName ?? "null");
 
-                string lookupResult = FF9TextTool.LocationName(currentMap);
-                Log.Message("[AccessibleNavigation] FF9TextTool.LocationName({0}) returned '{1}'", currentMap, lookupResult ?? "null");
-
-                if (!String.IsNullOrEmpty(areaName))
+                if (!String.IsNullOrEmpty(areaName) && areaName != currentMap.ToString())
                     ScreenReaderManager.Instance.Speak($"Entered {areaName}", false);
                 else
                     ScreenReaderManager.Instance.Speak($"Entered area {currentMap}", false);

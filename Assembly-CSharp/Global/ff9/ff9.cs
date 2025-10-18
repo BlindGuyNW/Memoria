@@ -4,6 +4,7 @@ using FF9;
 using Memoria;
 using Memoria.Prime;
 using Memoria.Prime.CSV;
+using Memoria.ScreenReader;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -3195,11 +3196,13 @@ public static class ff9
             {
                 atTip = true;
                 ff9.w_cameraSysDataCamera.upperCounterSpeed = 256;
+                ScreenReaderManager.Instance.Speak("Bird's eye view on", false);
             }
             if (ff9.w_cameraSysDataCamera.upperCounter == 4096)
             {
                 atTip = true;
                 ff9.w_cameraSysDataCamera.upperCounterSpeed = -256;
+                ScreenReaderManager.Instance.Speak("Bird's eye view off", false);
             }
             if (!atTip)
                 ff9.w_cameraSysDataCamera.upperCounterSpeed = -ff9.w_cameraSysDataCamera.upperCounterSpeed;
@@ -3214,6 +3217,14 @@ public static class ff9
         if (ff9.w_cameraSysData.cameraNotrot)
             ff9.w_movementSoftRot = true;
         ff9.w_cameraSysData.cameraNotrot = !ff9.w_cameraSysData.cameraNotrot;
+
+        // Announce the new state
+        // cameraNotrot = true means rotation is locked (manual camera)
+        // cameraNotrot = false means rotation is unlocked (auto-follows character)
+        if (ff9.w_cameraSysData.cameraNotrot)
+            ScreenReaderManager.Instance.Speak("Rotation lock on", false);
+        else
+            ScreenReaderManager.Instance.Speak("Rotation lock off", false);
     }
 
     public static void w_camera_makematrix(Camera camera, Vector3 t, Vector3 h, Vector3 v, Vector3 eye)
