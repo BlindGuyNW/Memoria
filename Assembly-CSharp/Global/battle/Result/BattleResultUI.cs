@@ -9,6 +9,7 @@ using Memoria;
 using Memoria.Assets;
 using Memoria.Data;
 using Memoria.Scenes;
+using Memoria.ScreenReader;
 
 public class BattleResultUI : UIScene
 {
@@ -165,6 +166,10 @@ public class BattleResultUI : UIScene
         this.expReceiveLabel.rawText = this.defaultExp.ToString();
         this.apReceiveLabel.rawText = this.defaultAp.ToString();
         FF9UIDataTool.DisplayTextLocalize(this.infoLabelGameObject, "BattleResultInfoEXPAP");
+
+        // Announce EXP and AP rewards
+        String announcement = String.Format("Battle complete. Received {0} experience points and {1} ability points.", this.defaultExp, this.defaultAp);
+        ScreenReaderManager.Instance.Speak(announcement, false);
     }
 
     private void DisplayGilAndItemInfo()
@@ -174,6 +179,7 @@ public class BattleResultUI : UIScene
         this.receiveGilLabel.rawText = Localization.GetWithDefault("GilSymbol").Replace("%", (this.gilValue.value - this.gilValue.current).ToString());
         this.currentGilLabel.rawText = Localization.GetWithDefault("GilSymbol").Replace("%", Mathf.Min(FF9StateSystem.Common.FF9.party.gil, 9999999f).ToString());
         FF9UIDataTool.DisplayTextLocalize(this.infoLabelGameObject, "BattleResultInfoGilItem");
+
         if (this.itemList.Count > 0)
         {
             this.ItemDetailPanel.SetActive(true);
@@ -196,6 +202,47 @@ public class BattleResultUI : UIScene
             this.ItemDetailPanel.SetActive(true);
             this.cardHud.Self.SetActive(true);
             this.cardHud.NameLabel.rawText = FF9TextTool.CardName(this.defaultCard);
+        }
+    }
+
+    private void AnnounceGilAndItemInfo()
+    {
+        // Build announcement for gil and items
+        System.Text.StringBuilder announcement = new System.Text.StringBuilder();
+
+        // Announce gil
+        if (this.gilValue.value > 0)
+        {
+            announcement.AppendFormat("Received {0} gil. ", this.gilValue.value);
+        }
+
+        if (this.itemList.Count > 0)
+        {
+            announcement.Append("Items received: ");
+            for (Int32 i = 0; i < this.itemList.Count; i++)
+            {
+                ItemListDetailWithIconHUD itemListDetailWithIconHUD = this.itemHudList[i];
+                String itemName = itemListDetailWithIconHUD.NameLabel.rawText;
+                if (this.itemList[i].count > 1)
+                    announcement.AppendFormat("{0} times {1}", this.itemList[i].count, itemName);
+                else
+                    announcement.Append(itemName);
+
+                if (i < this.itemList.Count - 1)
+                    announcement.Append(", ");
+            }
+            announcement.Append(". ");
+        }
+
+        if (this.defaultCard != TetraMasterCardId.NONE)
+        {
+            announcement.AppendFormat("Tetra Master card received: {0}. ", FF9TextTool.CardName(this.defaultCard));
+        }
+
+        // Speak the announcement if there's content
+        if (announcement.Length > 0)
+        {
+            ScreenReaderManager.Instance.Speak(announcement.ToString(), false);
         }
     }
 
@@ -251,6 +298,11 @@ public class BattleResultUI : UIScene
         ff9play.FF9Play_GrowLevel(player, player.level + 1);
         this.totalLevelUp[index]++;
         this.ShowLevelUpAnimation(index);
+
+        // Announce level up
+        String characterName = player.Name;
+        String announcement = String.Format("{0} leveled up to level {1}!", characterName, player.level);
+        ScreenReaderManager.Instance.Speak(announcement, false);
     }
 
     private void ShowLevelUpAnimation(Int32 index)
@@ -291,6 +343,7 @@ public class BattleResultUI : UIScene
     private void AfterShowGilAndItem()
     {
         this.DisplayGilAndItemInfo();
+        this.AnnounceGilAndItemInfo();
         this.ItemPanelTween.TweenIn(null);
         this.currentState = BattleResultUI.ResultState.StartGilAndItem;
     }
@@ -673,6 +726,13 @@ public class BattleResultUI : UIScene
         }
         this.characterBRInfoHudList[id].AbiltySprite.spriteName = spriteName;
         this.characterBRInfoHudList[id].AbilityLabel.rawText = abilName;
+
+        // Announce ability learned
+        PLAYER player = FF9StateSystem.Common.FF9.party.member[id];
+        String characterName = player.Name;
+        String announcement = String.Format("{0} learned {1}!", characterName, abilName);
+        ScreenReaderManager.Instance.Speak(announcement, false);
+
         this.abilityLearnedPanelTween[id].TweenIn(null);
         yield return new WaitForSeconds(1f);
         this.abilityLearnedPanelTween[id].TweenOut(delegate
