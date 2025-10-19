@@ -5,6 +5,7 @@ using Memoria.Data;
 using Memoria.Prime;
 using Memoria.Prime.Text;
 using Memoria.Scenes;
+using Memoria.ScreenReader;
 using Memoria.Speedrun;
 using Memoria.Test;
 using System;
@@ -157,6 +158,7 @@ public class UIKeyTrigger : MonoBehaviour
                 return;
             HandleBoosterButton();
             HandleDialogControlKeyPressCustomInput();
+            HandleFieldAccessibilityHotkeys();
         }
         catch (Exception err)
         {
@@ -933,6 +935,20 @@ public class UIKeyTrigger : MonoBehaviour
         UICamera.onNavigate = (UICamera.KeyCodeDelegate)Delegate.Combine(UICamera.onNavigate, (UICamera.KeyCodeDelegate)OnKeyNavigate);
         GameLoopManager.RaiseStartEvent();
         //DebugRectAroundObjectFactory.Run();
+    }
+
+    private void HandleFieldAccessibilityHotkeys()
+    {
+        // 'M' key (for Money) - Announce current gil (works in field, world, and pause)
+        // Only trigger without modifiers to avoid conflicts with Shift+Ctrl+M (Memoria menu)
+        if (MKeyDown && !ControlKey && !ShiftKey && !AltKey &&
+            (PersistenSingleton<UIManager>.Instance.State == UIManager.UIState.FieldHUD ||
+             PersistenSingleton<UIManager>.Instance.State == UIManager.UIState.WorldHUD ||
+             PersistenSingleton<UIManager>.Instance.State == UIManager.UIState.Pause))
+        {
+            UInt32 gil = FF9StateSystem.Common.FF9.party.gil;
+            ScreenReaderManager.Instance.Speak($"Gil: {gil}", interrupt: false);
+        }
     }
 
     [DllImport("user32.dll", CharSet = CharSet.Auto, ExactSpelling = true, CallingConvention = CallingConvention.Winapi)]

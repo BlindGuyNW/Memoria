@@ -5,7 +5,9 @@ using FF9;
 using Memoria;
 using Memoria.Assets;
 using Memoria.Data;
+using Memoria.Prime;
 using Memoria.Scenes;
+using Memoria.ScreenReader;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -319,6 +321,7 @@ public class ShopUI : UIScene
                         this.DisplayConfirmDialog(this.Type);
                         ButtonGroupState.ActiveGroup = ShopUI.QuantityGroupButton;
                         ButtonGroupState.HoldActiveStateOnGroup(ShopUI.ItemGroupButton);
+                        this.AnnounceQuantityChange();
                     }
                     else
                     {
@@ -345,6 +348,7 @@ public class ShopUI : UIScene
                         this.DisplayConfirmDialog(this.Type);
                         ButtonGroupState.ActiveGroup = ShopUI.QuantityGroupButton;
                         ButtonGroupState.HoldActiveStateOnGroup(ShopUI.WeaponGroupButton);
+                        this.AnnounceQuantityChange();
                     }
                     else
                     {
@@ -369,6 +373,7 @@ public class ShopUI : UIScene
                         this.DisplayConfirmDialog(ShopUI.ShopType.Sell);
                         ButtonGroupState.ActiveGroup = ShopUI.QuantityGroupButton;
                         ButtonGroupState.HoldActiveStateOnGroup(ShopUI.SellItemGroupButton);
+                        this.AnnounceQuantityChange();
                     }
                     else
                     {
@@ -574,6 +579,88 @@ public class ShopUI : UIScene
             }
         }
         return true;
+    }
+
+    protected override void AnnounceButtonForScreenReader(GameObject go)
+    {
+        try
+        {
+            String announcement = "";
+
+            if (ButtonGroupState.ActiveGroup == ShopUI.SubMenuGroupButton)
+            {
+                // For submenu, add "menu" suffix
+                String buttonText = GetButtonText(go);
+                if (!String.IsNullOrEmpty(buttonText))
+                    announcement = buttonText + " menu";
+            }
+            else if (ButtonGroupState.ActiveGroup == ShopUI.ItemGroupButton)
+            {
+                // Item shop announcement - get index from GameObject, not this.currentItemIndex
+                RecycleListItem listItem = go.GetComponent<RecycleListItem>();
+                if (listItem != null)
+                {
+                    Int32 index = listItem.ItemDataIndex;
+                    if (index >= 0 && index < this.itemIdList.Count)
+                    {
+                        RegularItem itemId = this.itemIdList[index];
+                        String itemName = FF9TextTool.RemoveOpCode(FF9TextTool.ItemName(itemId));
+                        UInt32 price = ff9item._FF9Item_Data[itemId].price;
+                        Int32 owned = ff9item.FF9Item_GetCount(itemId);
+                        String description = FF9TextTool.RemoveOpCode(FF9TextTool.ItemHelpDescription(itemId));
+                        announcement = $"{itemName}, {price} gil, owned: {owned}. {description}";
+                    }
+                }
+            }
+            else if (ButtonGroupState.ActiveGroup == ShopUI.WeaponGroupButton)
+            {
+                // Weapon shop announcement - get index from GameObject, not this.currentItemIndex
+                RecycleListItem listItem = go.GetComponent<RecycleListItem>();
+                if (listItem != null)
+                {
+                    Int32 index = listItem.ItemDataIndex;
+                    if (index >= 0 && index < this.itemIdList.Count)
+                    {
+                        RegularItem itemId = this.itemIdList[index];
+                        String itemName = FF9TextTool.RemoveOpCode(FF9TextTool.ItemName(itemId));
+                        UInt32 price = ff9item._FF9Item_Data[itemId].price;
+                        Int32 owned = ff9item.FF9Item_GetCount(itemId);
+                        Int32 equipped = ff9item.FF9Item_GetEquipCount(itemId);
+                        String description = FF9TextTool.RemoveOpCode(FF9TextTool.ItemHelpDescription(itemId));
+                        announcement = $"{itemName}, {price} gil, owned: {owned}, equipped: {equipped}. {description}";
+                    }
+                }
+            }
+            else if (ButtonGroupState.ActiveGroup == ShopUI.SellItemGroupButton)
+            {
+                // Sell item announcement - get index from GameObject, not this.currentItemIndex
+                RecycleListItem listItem = go.GetComponent<RecycleListItem>();
+                if (listItem != null)
+                {
+                    Int32 index = listItem.ItemDataIndex;
+                    if (index >= 0 && index < this.sellItemIdList.Count)
+                    {
+                        RegularItem itemId = this.sellItemIdList[index];
+                        String itemName = FF9TextTool.RemoveOpCode(FF9TextTool.ItemName(itemId));
+                        Int32 sellingPrice = ff9item._FF9Item_Data[itemId].selling_price;
+                        Int32 quantity = ff9item.FF9Item_GetCount(itemId);
+                        String description = FF9TextTool.RemoveOpCode(FF9TextTool.ItemHelpDescription(itemId));
+
+                        if (sellingPrice < 0)
+                            announcement = $"{itemName}, cannot be sold. {description}";
+                        else
+                            announcement = $"{itemName}, sell for {sellingPrice} gil, quantity: {quantity}. {description}";
+                    }
+                }
+            }
+
+            if (!String.IsNullOrEmpty(announcement))
+                ScreenReaderManager.Instance.Speak(announcement, false);
+        }
+        catch (Exception e)
+        {
+            Log.Error("Screen reader announcement failed: " + e.Message);
+        }
     }
 
     private void OnKeyQuantity(GameObject go, KeyCode key)
@@ -1356,6 +1443,7 @@ public class ShopUI : UIScene
             FF9Sfx.FF9SFX_Play(103);
             this.count = newCount;
             this.DisplayConfirmDialog(this.currentMenu != ShopUI.SubMenu.Sell ? this.Type : ShopUI.ShopType.Sell);
+            this.AnnounceQuantityChange();
         }
     }
 
@@ -1367,6 +1455,49 @@ public class ShopUI : UIScene
             FF9Sfx.FF9SFX_Play(103);
             this.count = newCount;
             this.DisplayConfirmDialog(this.currentMenu != ShopUI.SubMenu.Sell ? this.Type : ShopUI.ShopType.Sell);
+            this.AnnounceQuantityChange();
+        }
+    }
+
+    private void AnnounceQuantityChange()
+    {
+        try
+        {
+            String announcement = "";
+
+            if (this.currentMenu == ShopUI.SubMenu.Buy)
+            {
+                if (this.type == ShopUI.ShopType.Item || this.type == ShopUI.ShopType.Weapon)
+                {
+                    RegularItem itemId = this.itemIdList[this.currentItemIndex];
+                    String itemName = FF9TextTool.RemoveOpCode(FF9TextTool.ItemName(itemId));
+                    UInt32 unitPrice = ff9item._FF9Item_Data[itemId].price;
+                    UInt32 totalPrice = unitPrice * (UInt32)this.count;
+                    announcement = $"Buying {this.count} {itemName} for {totalPrice} gil";
+                }
+                else if (this.type == ShopUI.ShopType.Synthesis)
+                {
+                    FF9MIX_DATA synth = this.mixItemList[this.currentItemIndex - this.mixStartIndex];
+                    String itemName = FF9TextTool.RemoveOpCode(FF9TextTool.ItemName(synth.Result));
+                    UInt32 totalPrice = synth.Price * (UInt32)this.count;
+                    announcement = $"Synthesizing {this.count} {itemName} for {totalPrice} gil";
+                }
+            }
+            else if (this.currentMenu == ShopUI.SubMenu.Sell)
+            {
+                RegularItem itemId = this.sellItemIdList[this.currentItemIndex];
+                String itemName = FF9TextTool.RemoveOpCode(FF9TextTool.ItemName(itemId));
+                Int32 unitPrice = ff9item._FF9Item_Data[itemId].selling_price;
+                Int32 totalPrice = unitPrice * this.count;
+                announcement = $"Selling {this.count} {itemName} for {totalPrice} gil";
+            }
+
+            if (!String.IsNullOrEmpty(announcement))
+                ScreenReaderManager.Instance.Speak(announcement, false);
+        }
+        catch (Exception e)
+        {
+            Log.Error("Screen reader quantity announcement failed: " + e.Message);
         }
     }
 

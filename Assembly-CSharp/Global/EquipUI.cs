@@ -4,7 +4,9 @@ using FF9;
 using Memoria;
 using Memoria.Assets;
 using Memoria.Data;
+using Memoria.Prime;
 using Memoria.Scenes;
+using Memoria.ScreenReader;
 using NCalc;
 using System;
 using System.Linq;
@@ -392,6 +394,139 @@ public class EquipUI : UIScene
         }
 
         return true;
+    }
+
+    protected override void AnnounceButtonForScreenReader(GameObject go)
+    {
+        try
+        {
+            String announcement = "";
+
+            if (ButtonGroupState.ActiveGroup == EquipUI.SubMenuGroupButton)
+            {
+                // Read submenu text from the GameObject's label
+                announcement = base.GetButtonText(go);
+            }
+            else if (ButtonGroupState.ActiveGroup == EquipUI.EquipmentGroupButton)
+            {
+                // Read slot index directly from GameObject, not cached state
+                Int32 slotIndex = go.transform.GetSiblingIndex();
+                PLAYER player = FF9StateSystem.Common.FF9.party.member[this.currentPartyIndex];
+
+                String slotName = slotIndex switch
+                {
+                    0 => "Weapon",
+                    1 => "Head",
+                    2 => "Wrist",
+                    3 => "Armor",
+                    4 => "Accessory",
+                    _ => "Equipment"
+                };
+
+                RegularItem itemId = player.equip[slotIndex];
+                if (itemId == RegularItem.NoItem)
+                {
+                    announcement = $"{slotName}: Empty";
+                }
+                else
+                {
+                    String itemName = FF9TextTool.ItemName(itemId);
+                    FF9ITEM_DATA itemData = ff9item._FF9Item_Data[itemId];
+                    List<String> abilities = new List<String>();
+                    foreach (Int32 abilityId in itemData.ability)
+                    {
+                        if (abilityId != 0)
+                        {
+                            String abilityName = ff9abil.IsAbilityActive(abilityId)
+                                ? FF9TextTool.ActionAbilityName(ff9abil.GetActiveAbilityFromAbilityId(abilityId))
+                                : FF9TextTool.SupportAbilityName(ff9abil.GetSupportAbilityFromAbilityId(abilityId));
+                            abilities.Add(abilityName);
+                        }
+                    }
+
+                    if (abilities.Count > 0)
+                        announcement = $"{slotName}: {itemName}. Abilities: {String.Join(", ", abilities.ToArray())}";
+                    else
+                        announcement = $"{slotName}: {itemName}";
+                }
+            }
+            else if (ButtonGroupState.ActiveGroup == EquipUI.InventoryGroupButton)
+            {
+                // Read item index directly from GameObject, not cached state
+                RecycleListItem listItem = go.GetComponent<RecycleListItem>();
+                if (listItem != null)
+                {
+                    Int32 itemIndex = listItem.ItemDataIndex;
+                    if (itemIndex >= 0 && itemIndex < this.itemIdList[this.currentEquipPart].Count)
+                    {
+                        PLAYER player = FF9StateSystem.Common.FF9.party.member[this.currentPartyIndex];
+                        RegularItem itemId = this.itemIdList[this.currentEquipPart][itemIndex].id;
+                        String itemName = FF9TextTool.ItemName(itemId);
+                        Int32 owned = ff9item.FF9Item_GetCount(itemId);
+
+                        announcement = $"{itemName}, owned: {owned}";
+
+                        // Get stat changes
+                        RegularItem itemEquipped = player.equip[this.currentEquipPart];
+                        if (itemId != itemEquipped && itemId != RegularItem.NoItem)
+                        {
+                            String[] statNames = { "Strength", "Defense", "Magic Attack", "Magic Defense", "Speed", "Strength", "Magic", "Spirit", "Speed" };
+                            List<String> statChanges = new List<String>();
+
+                            // Temporarily equip to calculate changes
+                            player.equip[this.currentEquipPart] = itemId;
+                            ff9play.FF9Play_Update(player);
+                            Int32[] previewStats = new Int32[9];
+                            for (Int32 i = 0; i < 9; i++)
+                                previewStats[i] = player.GetPlayerStat(i);
+
+                            player.equip[this.currentEquipPart] = itemEquipped;
+                            ff9play.FF9Play_Update(player);
+                            Int32[] currentStats = new Int32[9];
+                            for (Int32 i = 0; i < 9; i++)
+                                currentStats[i] = player.GetPlayerStat(i);
+
+                            for (Int32 i = 0; i < 9; i++)
+                            {
+                                Int32 change = previewStats[i] - currentStats[i];
+                                if (change != 0)
+                                {
+                                    String sign = change > 0 ? "+" : "";
+                                    statChanges.Add($"{statNames[i]} {sign}{change}");
+                                }
+                            }
+
+                            if (statChanges.Count > 0)
+                                announcement += ". " + String.Join(", ", statChanges.ToArray());
+                        }
+
+                        // Get abilities
+                        FF9ITEM_DATA itemData = ff9item._FF9Item_Data[itemId];
+                        List<String> abilities = new List<String>();
+                        foreach (Int32 abilityId in itemData.ability)
+                        {
+                            if (abilityId != 0)
+                            {
+                                String abilityName = ff9abil.IsAbilityActive(abilityId)
+                                    ? FF9TextTool.ActionAbilityName(ff9abil.GetActiveAbilityFromAbilityId(abilityId))
+                                    : FF9TextTool.SupportAbilityName(ff9abil.GetSupportAbilityFromAbilityId(abilityId));
+                                abilities.Add(abilityName);
+                            }
+                        }
+
+                        if (abilities.Count > 0)
+                            announcement += ". Abilities: " + String.Join(", ", abilities.ToArray());
+                    }
+                }
+            }
+
+            if (!String.IsNullOrEmpty(announcement))
+                ScreenReaderManager.Instance.Speak(announcement, false);
+        }
+        catch (Exception e)
+        {
+            Log.Error("Screen reader announcement failed: " + e.Message);
+        }
     }
 
     public override Boolean OnKeySpecial(GameObject go)
