@@ -1,4 +1,5 @@
 ﻿using Memoria;
+using Memoria.Prime;
 using System;
 using System.Collections.Generic;
 using UnityEngine;
@@ -112,6 +113,9 @@ public class BubbleUI : Singleton<BubbleUI>
         List<Byte> list = new List<Byte>(flags.Length);
 
         flags = FilterFlags(flags);
+
+        // ACCESSIBILITY: Announce interaction bubble via screen reader
+        AnnounceInteractionBubble(coll, flags);
 
         for (Int32 i = 0; i < (Int32)flags.Length; i++)
         {
@@ -502,6 +506,77 @@ public class BubbleUI : Singleton<BubbleUI>
     public BubbleButton beachButton;
 
     public static readonly Vector3 UIDefaultOffset = new Vector3(0f, 50f, 0f);
+
+    // ACCESSIBILITY: Announce interaction bubbles via screen reader
+    private void AnnounceInteractionBubble(Obj coll, BubbleUI.Flag[] flags)
+    {
+        if (flags == null || flags.Length == 0)
+            return;
+
+        try
+        {
+            // Determine interaction type from flags
+            string interactionType = "Interactive object";
+            bool hasCursor = false;
+            bool hasExclamation = false;
+            bool hasQuestion = false;
+
+            foreach (var flag in flags)
+            {
+                switch (flag)
+                {
+                    case Flag.CURSOR:
+                        hasCursor = true;
+                        break;
+                    case Flag.EXCLAMATION:
+                        hasExclamation = true;
+                        break;
+                    case Flag.QUESTION:
+                        hasQuestion = true;
+                        break;
+                    case Flag.DUEL:
+                        interactionType = "Card game available";
+                        break;
+                    case Flag.BEACH:
+                        interactionType = "Beach minigame";
+                        break;
+                }
+            }
+
+            // Determine what the interaction is based on flag combination
+            string announcement = "";
+            if (hasExclamation)
+            {
+                announcement = "Interact";
+            }
+            else if (hasQuestion)
+            {
+                announcement = "Info";
+            }
+            else if (interactionType == "Card game available")
+            {
+                announcement = "Card game";
+            }
+            else if (interactionType == "Beach minigame")
+            {
+                announcement = "Minigame";
+            }
+            else
+            {
+                announcement = "Interact";
+            }
+
+            // Announce via screen reader
+            Memoria.ScreenReader.ScreenReaderManager.Instance.Speak(announcement, interrupt: false);
+
+            // Also log for debugging
+            Log.Message("[BubbleUI] Interaction available: " + announcement);
+        }
+        catch (System.Exception ex)
+        {
+            Log.Error("[BubbleUI] Error announcing interaction: " + ex.Message);
+        }
+    }
 
     public enum IconType : int
     {

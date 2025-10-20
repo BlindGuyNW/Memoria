@@ -263,13 +263,13 @@ namespace Memoria.Accessibility
                     continue;
                 }
 
-                // Count by type
+                // Count by type (including classObj which we might have been missing!)
                 if (obj.cid == EventEngine.classActor)
                     actorCount++;
                 else if (obj.cid == EventEngine.classQuad)
                     quadCount++;
-                else if (obj.cid != EventEngine.classObj && obj.cid != EventEngine.classSeq && obj.cid != EventEngine.classThread)
-                    otherCount++;
+                else
+                    otherCount++; // Count ALL other types including classObj!
             }
 
             Log.Message("[AccessibleNavigation] Scene stats: Total={0}, Invisible={1}, Actors={2}, Quads={3}, Other={4}",
@@ -282,17 +282,64 @@ namespace Memoria.Accessibility
                 if (obj == null)
                     continue;
 
-                // Log invisible objects for debugging (to understand what we're missing)
+                // Check invisible objects - we'll process some, not all
                 bool isInvisible = (obj.flags & EventEngine.flagShow) == 0;
                 if (isInvisible)
                 {
+                    // Log all invisible objects for debugging
                     if (obj.cid == EventEngine.classQuad)
-                        Log.Message("[AccessibleNavigation] INVISIBLE QUAD: sid={0} uid={1} flags={2}", obj.sid, obj.uid, obj.flags);
+                    {
+                        Quad quad = obj as Quad;
+                        bool hasTalk = eventEngine.GetIP((int)obj.sid, EventEngine.tagTalk, obj.ebData) != eventEngine.nil;
+                        bool hasPush = eventEngine.GetIP((int)obj.sid, EventEngine.tagPush, obj.ebData) != eventEngine.nil;
+                        bool hasInit = eventEngine.GetIP((int)obj.sid, EventEngine.tagInit, obj.ebData) != eventEngine.nil;
+                        bool hasDefault = eventEngine.GetIP((int)obj.sid, EventEngine.tagDefault, obj.ebData) != eventEngine.nil;
+                        string scriptInfo = null;
+                        if (hasTalk)
+                            scriptInfo = AnalyzeEventScript(quad, EventEngine.tagTalk, eventEngine);
+                        else if (hasPush)
+                            scriptInfo = AnalyzeEventScript(quad, EventEngine.tagPush, eventEngine);
+                        else if (hasDefault)
+                            scriptInfo = AnalyzeEventScript(quad, EventEngine.tagDefault, eventEngine);
+                        else if (hasInit)
+                            scriptInfo = AnalyzeEventScript(quad, EventEngine.tagInit, eventEngine);
+                        Log.Message("[AccessibleNavigation] INVISIBLE QUAD: sid={0} uid={1} flags={2} init={3} default={4} push={5} talk={6} script={7}",
+                            obj.sid, obj.uid, obj.flags, hasInit, hasDefault, hasPush, hasTalk, scriptInfo ?? "none");
+
+                        // Skip invisible quads with no events
+                        if (!hasTalk && !hasPush && !hasDefault && !hasInit)
+                            continue;
+                        // Otherwise fall through to process this invisible quad
+                    }
                     else if (obj.cid == EventEngine.classActor)
-                        Log.Message("[AccessibleNavigation] INVISIBLE ACTOR: sid={0} uid={1} flags={2}", obj.sid, obj.uid, obj.flags);
+                    {
+                        Actor actor = obj as Actor;
+                        bool hasTalk = eventEngine.GetIP((int)obj.sid, EventEngine.tagTalk, obj.ebData) != eventEngine.nil;
+                        bool hasPush = eventEngine.GetIP((int)obj.sid, EventEngine.tagPush, obj.ebData) != eventEngine.nil;
+                        bool hasInit = eventEngine.GetIP((int)obj.sid, EventEngine.tagInit, obj.ebData) != eventEngine.nil;
+                        bool hasDefault = eventEngine.GetIP((int)obj.sid, EventEngine.tagDefault, obj.ebData) != eventEngine.nil;
+                        string scriptInfo = null;
+                        if (hasTalk)
+                            scriptInfo = AnalyzeEventScript(actor, EventEngine.tagTalk, eventEngine);
+                        else if (hasPush)
+                            scriptInfo = AnalyzeEventScript(actor, EventEngine.tagPush, eventEngine);
+                        else if (hasDefault)
+                            scriptInfo = AnalyzeEventScript(actor, EventEngine.tagDefault, eventEngine);
+                        else if (hasInit)
+                            scriptInfo = AnalyzeEventScript(actor, EventEngine.tagInit, eventEngine);
+                        Log.Message("[AccessibleNavigation] INVISIBLE ACTOR: sid={0} uid={1} flags={2} model={3} init={4} default={5} push={6} talk={7} script={8}",
+                            obj.sid, obj.uid, obj.flags, actor != null ? actor.model : -1, hasInit, hasDefault, hasPush, hasTalk, scriptInfo ?? "none");
+
+                        // Skip invisible actors with no events
+                        if (!hasTalk && !hasPush && !hasDefault && !hasInit)
+                            continue;
+                        // Otherwise fall through to process this invisible actor
+                    }
                     else
+                    {
                         Log.Message("[AccessibleNavigation] INVISIBLE OTHER: cid={0} sid={1} uid={2} flags={3}", obj.cid, obj.sid, obj.uid, obj.flags);
-                    continue;
+                        continue; // Always skip non-Actor/Quad invisible objects
+                    }
                 }
 
                 // Handle Actors (cid == 4)
@@ -355,6 +402,10 @@ namespace Memoria.Accessibility
                     string objType = GetObjectType(actor, eventEngine);
                     string objName = GetObjectName(actor, eventEngine);
 
+                    // Mark invisible objects clearly
+                    if (isInvisible)
+                        objName += " (Invisible)";
+
                     InteractiveObject interactiveObj = new InteractiveObject(
                         obj,
                         objName,
@@ -379,10 +430,12 @@ namespace Memoria.Accessibility
                         continue;
                     }
 
-                    // Check if quad has talk or push events
+                    // Check if quad has interactive events (talk, push, default, or init)
                     bool hasTalk = eventEngine.GetIP((int)quad.sid, EventEngine.tagTalk, quad.ebData) != eventEngine.nil;
                     bool hasPush = eventEngine.GetIP((int)quad.sid, EventEngine.tagPush, quad.ebData) != eventEngine.nil;
-                    bool isInteractive = hasTalk || hasPush;
+                    bool hasDefault = eventEngine.GetIP((int)quad.sid, EventEngine.tagDefault, quad.ebData) != eventEngine.nil;
+                    bool hasInit = eventEngine.GetIP((int)quad.sid, EventEngine.tagInit, quad.ebData) != eventEngine.nil;
+                    bool isInteractive = hasTalk || hasPush || hasDefault || hasInit;
 
                     // Check if this would actually show an icon (requires level > 1)
                     bool wouldShowIcon = (hasTalk || hasPush) && quad.level > 1;
@@ -405,13 +458,13 @@ namespace Memoria.Accessibility
                     Vector3 toObject2D = new Vector3(toObject.x, 0, toObject.z);
                     float distance = toObject2D.magnitude;
 
-                    Log.Message("[AccessibleNavigation] Quad: sid={0} uid={1} pos={2} dist={3:F0} level={4} talk={5} push={6} showIcon={7} go={8} flags={9}",
-                        quad.sid, quad.uid, objPos, distance, quad.level, hasTalk, hasPush, wouldShowIcon, goName ?? "null", quad.flags);
+                    Log.Message("[AccessibleNavigation] Quad: sid={0} uid={1} pos={2} dist={3:F0} level={4} init={5} default={6} push={7} talk={8} showIcon={9} go={10} flags={11}",
+                        quad.sid, quad.uid, objPos, distance, quad.level, hasInit, hasDefault, hasPush, hasTalk, wouldShowIcon, goName ?? "null", quad.flags);
 
                     // Skip quads that have no interactive events
                     if (!isInteractive)
                     {
-                        Log.Message("[AccessibleNavigation]   -> SKIPPED: No talk/push events");
+                        Log.Message("[AccessibleNavigation]   -> SKIPPED: No interactive events (init/default/push/talk)");
                         continue;
                     }
 
@@ -439,10 +492,14 @@ namespace Memoria.Accessibility
 
                     // Try to analyze the event script first to get meaningful info
                     string scriptInfo = null;
-                    if (hasPush)
-                        scriptInfo = AnalyzeEventScript(quad, EventEngine.tagPush, eventEngine);
-                    else if (hasTalk)
+                    if (hasTalk)
                         scriptInfo = AnalyzeEventScript(quad, EventEngine.tagTalk, eventEngine);
+                    else if (hasPush)
+                        scriptInfo = AnalyzeEventScript(quad, EventEngine.tagPush, eventEngine);
+                    else if (hasDefault)
+                        scriptInfo = AnalyzeEventScript(quad, EventEngine.tagDefault, eventEngine);
+                    else if (hasInit)
+                        scriptInfo = AnalyzeEventScript(quad, EventEngine.tagInit, eventEngine);
 
                     if (!String.IsNullOrEmpty(scriptInfo))
                     {
@@ -487,6 +544,10 @@ namespace Memoria.Accessibility
                         quadType = "Zone";
                     }
 
+                    // Mark invisible objects clearly
+                    if (isInvisible)
+                        quadName += " (Invisible)";
+
                     InteractiveObject interactiveObj = new InteractiveObject(
                         obj,
                         quadName,
@@ -501,7 +562,46 @@ namespace Memoria.Accessibility
                     Log.Message("[AccessibleNavigation]   -> ADDED: {0} ({1}) [ShowsIcon={2}, InRange={3}, Dist={4:F0}]", quadName, quadType, wouldShowIcon, inInteractionRange, distance);
                     _nearbyObjects.Add(interactiveObj);
                 }
-                else if (obj.cid != EventEngine.classObj && obj.cid != EventEngine.classSeq && obj.cid != EventEngine.classThread)
+                // Handle classObj (cid == 0) - might be floor items!
+                else if (obj.cid == EventEngine.classObj)
+                {
+                    PosObj posObj = obj as PosObj;
+                    if (posObj != null)
+                    {
+                        Vector3 objPos = new Vector3(posObj.pos[0], posObj.pos[1], posObj.pos[2]);
+                        Vector3 toObject = objPos - playerPos;
+                        float distance = new Vector3(toObject.x, 0, toObject.z).magnitude;
+
+                        // Check for events
+                        bool hasTalk = eventEngine.GetIP((int)obj.sid, EventEngine.tagTalk, obj.ebData) != eventEngine.nil;
+                        bool hasPush = eventEngine.GetIP((int)obj.sid, EventEngine.tagPush, obj.ebData) != eventEngine.nil;
+                        bool hasDefault = eventEngine.GetIP((int)obj.sid, EventEngine.tagDefault, obj.ebData) != eventEngine.nil;
+                        bool hasInit = eventEngine.GetIP((int)obj.sid, EventEngine.tagInit, obj.ebData) != eventEngine.nil;
+
+                        Log.Message("[AccessibleNavigation] classObj: sid={0} uid={1} pos={2} dist={3:F0} init={4} default={5} push={6} talk={7}",
+                            obj.sid, obj.uid, objPos, distance, hasInit, hasDefault, hasPush, hasTalk);
+
+                        if (hasTalk || hasPush || hasDefault || hasInit)
+                        {
+                            string scriptInfo = null;
+                            if (hasTalk)
+                                scriptInfo = AnalyzeEventScript(posObj, EventEngine.tagTalk, eventEngine);
+                            else if (hasPush)
+                                scriptInfo = AnalyzeEventScript(posObj, EventEngine.tagPush, eventEngine);
+                            else if (hasDefault)
+                                scriptInfo = AnalyzeEventScript(posObj, EventEngine.tagDefault, eventEngine);
+                            else if (hasInit)
+                                scriptInfo = AnalyzeEventScript(posObj, EventEngine.tagInit, eventEngine);
+
+                            Log.Message("[AccessibleNavigation]   classObj HAS EVENTS! Script: {0}", scriptInfo ?? "unknown");
+                        }
+                    }
+                    else
+                    {
+                        Log.Message("[AccessibleNavigation] classObj (not PosObj): sid={0} uid={1}", obj.sid, obj.uid);
+                    }
+                }
+                else if (obj.cid != EventEngine.classSeq && obj.cid != EventEngine.classThread)
                 {
                     // Log any other CID types we haven't accounted for
                     Log.Message("[AccessibleNavigation] Unknown object type: cid={0} sid={1} uid={2}", obj.cid, obj.sid, obj.uid);
@@ -878,34 +978,46 @@ namespace Memoria.Accessibility
             int currentMapId = FF9StateSystem.Common.FF9.fldMapNo;
             string areaName = FF9StateSystem.Common.FF9.mapNameStr;
 
-            Log.Message("===== F9 DEBUG DUMP - ALL VISIBLE OBJECTS =====");
+            Log.Message("===== F10 DEBUG DUMP - ALL OBJECTS INCLUDING INVISIBLE =====");
             Log.Message("Map ID: {0} ({1})", currentMapId, areaName ?? "unknown");
             Log.Message("Player position: {0}", playerPos);
             Log.Message("");
 
             int totalVisible = 0;
+            int totalInvisible = 0;
             int actorCount = 0;
             int quadCount = 0;
+            int invisQuadCount = 0;
             int otherCount = 0;
 
-            // First pass - count and categorize
+            // First pass - count and categorize (including invisible)
             for (ObjList objList = eventEngine.GetActiveObjList(); objList != null; objList = objList.next)
             {
                 Obj obj = objList.obj;
-                if (obj == null || (obj.flags & EventEngine.flagShow) == 0)
+                if (obj == null)
                     continue;
 
-                totalVisible++;
-                if (obj.cid == EventEngine.classActor)
-                    actorCount++;
-                else if (obj.cid == EventEngine.classQuad)
-                    quadCount++;
+                bool isInvisible = (obj.flags & EventEngine.flagShow) == 0;
+                if (isInvisible)
+                {
+                    totalInvisible++;
+                    if (obj.cid == EventEngine.classQuad)
+                        invisQuadCount++;
+                }
                 else
-                    otherCount++;
+                {
+                    totalVisible++;
+                    if (obj.cid == EventEngine.classActor)
+                        actorCount++;
+                    else if (obj.cid == EventEngine.classQuad)
+                        quadCount++;
+                    else
+                        otherCount++;
+                }
             }
 
-            Log.Message("SUMMARY: {0} visible objects ({1} actors, {2} quads, {3} other)",
-                totalVisible, actorCount, quadCount, otherCount);
+            Log.Message("SUMMARY: {0} visible ({1} actors, {2} quads, {3} other), {4} invisible ({5} invisible quads)",
+                totalVisible, actorCount, quadCount, otherCount, totalInvisible, invisQuadCount);
             Log.Message("");
 
             // Second pass - detailed dump
@@ -1014,10 +1126,62 @@ namespace Memoria.Accessibility
                 }
             }
 
+            // Third pass - dump INVISIBLE Quads (might be floor items!)
+            if (invisQuadCount > 0)
+            {
+                Log.Message("===== INVISIBLE QUADS ({0}) =====", invisQuadCount);
+                Log.Message("");
+
+                for (ObjList objList = eventEngine.GetActiveObjList(); objList != null; objList = objList.next)
+                {
+                    Obj obj = objList.obj;
+                    if (obj == null || (obj.flags & EventEngine.flagShow) != 0 || obj.cid != EventEngine.classQuad)
+                        continue;
+
+                    Quad quad = obj as Quad;
+                    if (quad == null || quad.q == null || quad.q.Length == 0) continue;
+
+                    // Calculate center
+                    Vector3 objPos = Vector3.zero;
+                    for (int i = 0; i < quad.n && i < quad.q.Length; i++)
+                    {
+                        objPos += quad.q[i].Vector3Val;
+                    }
+                    objPos /= quad.n;
+                    float distance = (objPos - playerPos).magnitude;
+
+                    // Check ALL event tags
+                    bool hasInit = eventEngine.GetIP((int)quad.sid, EventEngine.tagInit, quad.ebData) != eventEngine.nil;
+                    bool hasDefault = eventEngine.GetIP((int)quad.sid, EventEngine.tagDefault, quad.ebData) != eventEngine.nil;
+                    bool hasPush = eventEngine.GetIP((int)quad.sid, EventEngine.tagPush, quad.ebData) != eventEngine.nil;
+                    bool hasTalk = eventEngine.GetIP((int)quad.sid, EventEngine.tagTalk, quad.ebData) != eventEngine.nil;
+
+                    // Analyze script
+                    string scriptInfo = null;
+                    if (hasTalk)
+                        scriptInfo = AnalyzeEventScript(quad, EventEngine.tagTalk, eventEngine);
+                    else if (hasPush)
+                        scriptInfo = AnalyzeEventScript(quad, EventEngine.tagPush, eventEngine);
+                    else if (hasDefault)
+                        scriptInfo = AnalyzeEventScript(quad, EventEngine.tagDefault, eventEngine);
+                    else if (hasInit)
+                        scriptInfo = AnalyzeEventScript(quad, EventEngine.tagInit, eventEngine);
+
+                    Log.Message("INVISIBLE QUAD: SID={0} UID={1} Level={2} Flags={3}",
+                        quad.sid, quad.uid, quad.level, quad.flags);
+                    Log.Message("    Position={0} Distance={1:F0}", objPos, distance);
+                    Log.Message("    Events: Init={0} Default={1} Push={2} Talk={3}",
+                        hasInit, hasDefault, hasPush, hasTalk);
+                    if (!String.IsNullOrEmpty(scriptInfo))
+                        Log.Message("    Script: {0}", scriptInfo);
+                    Log.Message("");
+                }
+            }
+
             Log.Message("===== END DEBUG DUMP =====");
             Log.Message("");
 
-            ScreenReaderManager.Instance.Speak(String.Format("Dumped {0} visible objects to log", totalVisible), false);
+            ScreenReaderManager.Instance.Speak(String.Format("Dumped {0} visible and {1} invisible quads to log", totalVisible, invisQuadCount), false);
         }
 
         private void CyclePrevious()
