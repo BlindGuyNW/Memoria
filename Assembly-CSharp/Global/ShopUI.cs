@@ -623,11 +623,45 @@ public class ShopUI : UIScene
                     {
                         RegularItem itemId = this.itemIdList[index];
                         String itemName = FF9TextTool.RemoveOpCode(FF9TextTool.ItemName(itemId));
-                        UInt32 price = ff9item._FF9Item_Data[itemId].price;
                         Int32 owned = ff9item.FF9Item_GetCount(itemId);
-                        Int32 equipped = ff9item.FF9Item_GetEquipCount(itemId);
                         String description = FF9TextTool.RemoveOpCode(FF9TextTool.ItemHelpDescription(itemId));
-                        announcement = $"{itemName}, {price} gil, owned: {owned}, equipped: {equipped}. {description}";
+
+                        // Check if this is a synthesis item
+                        if (this.type == ShopUI.ShopType.Synthesis && index >= this.mixStartIndex)
+                        {
+                            // Synthesis item announcement
+                            FF9MIX_DATA synth = this.mixItemList[index - this.mixStartIndex];
+                            UInt32 price = synth.Price; // Use synthesis price, not result item's price
+
+                            // Check if can be synthesized and build missing ingredients list if not
+                            String missingText = "";
+                            if (!synth.CanBeSynthesized())
+                            {
+                                List<String> missingItems = new List<String>();
+                                foreach (KeyValuePair<RegularItem, Int32> kvp in synth.IngredientsAsDictionary())
+                                {
+                                    Int32 have = ff9item.FF9Item_GetCount(kvp.Key);
+                                    Int32 need = kvp.Value;
+                                    if (have < need)
+                                    {
+                                        String ingredientName = FF9TextTool.RemoveOpCode(FF9TextTool.ItemName(kvp.Key));
+                                        missingItems.Add($"{need} {ingredientName}");
+                                    }
+                                }
+
+                                if (missingItems.Count > 0)
+                                    missingText = " Missing: " + String.Join(", ", missingItems.ToArray()) + ".";
+                            }
+
+                            announcement = $"{itemName}, {price} gil, owned: {owned}.{missingText} {description}";
+                        }
+                        else
+                        {
+                            // Regular weapon announcement
+                            UInt32 price = ff9item._FF9Item_Data[itemId].price;
+                            Int32 equipped = ff9item.FF9Item_GetEquipCount(itemId);
+                            announcement = $"{itemName}, {price} gil, owned: {owned}, equipped: {equipped}. {description}";
+                        }
                     }
                 }
             }
