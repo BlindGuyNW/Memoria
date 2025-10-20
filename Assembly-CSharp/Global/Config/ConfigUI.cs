@@ -983,6 +983,95 @@ public class ConfigUI : UIScene
         return true;
     }
 
+    /// <summary>Override GetButtonText to include setting values for screen reader announcements</summary>
+    protected override String GetButtonText(GameObject go)
+    {
+        if (go == null)
+            return null;
+
+        // Handle booster panel items (Master Skill, LvMax, GilMax)
+        if (go.GetParent() == BoosterPanel)
+            return base.GetButtonText(go);
+
+        // Find the config field for this GameObject
+        ConfigField configField = ConfigFieldList?.FirstOrDefault(field => field.ConfigParent == go);
+        if (configField == null)
+            return base.GetButtonText(go);
+
+        // Get the base setting name
+        String settingName = Localization.GetWithDefault(configField.Configurator.ToString());
+
+        // Add current value based on setting type
+        String valueText = GetConfigValueText(configField);
+
+        if (!String.IsNullOrEmpty(valueText))
+            return settingName + ", " + valueText;
+
+        return settingName;
+    }
+
+    /// <summary>Get the current value text for a config field</summary>
+    private String GetConfigValueText(ConfigField configField)
+    {
+        // Button-only settings (no value)
+        if (configField.Configurator == Configurator.ControlTutorial ||
+            configField.Configurator == Configurator.CombatTutorial ||
+            configField.Configurator == Configurator.Title ||
+            configField.Configurator == Configurator.QuitGame)
+        {
+            return null;
+        }
+
+        // Slider settings
+        if (configField.IsSlider)
+        {
+            if (configField.Configurator == Configurator.ATBMode)
+            {
+                // ATB Mode - return the mode name
+                ATBMode mode = (ATBMode)(configField.Value * 3);
+                return Localization.GetWithDefault(mode.ToString());
+            }
+            else if (configField.Configurator >= Configurator.SoundVolume)
+            {
+                // Volume sliders - return percentage
+                Int32 percent = (Int32)Math.Round(configField.Value * 20) * 5;
+                return percent + " percent";
+            }
+            else if (configField.Configurator == Configurator.FieldMessage)
+            {
+                // Field message speed (0-6)
+                Int32 speed = (Int32)Math.Round(configField.Value * fieldMessageSliderStep);
+                return speed.ToString();
+            }
+            else if (configField.Configurator == Configurator.BattleSpeed)
+            {
+                // Battle speed (0-2)
+                Int32 speed = (Int32)Math.Round(configField.Value * battleSpeedSliderStep);
+                return speed.ToString();
+            }
+        }
+        // Toggle settings
+        else if (configField.ConfigChoice.size >= 2)
+        {
+            // Get the text from the active choice
+            Int32 choiceIndex = (Int32)configField.Value;
+            if (choiceIndex >= 0 && choiceIndex < configField.ConfigChoice.size)
+            {
+                GameObject choice = configField.ConfigChoice[choiceIndex];
+                UILabel label = choice.GetComponentInChildren<UILabel>();
+                if (label != null)
+                {
+                    UILocalize localize = choice.GetComponentInChildren<UILocalize>();
+                    if (localize != null && !String.IsNullOrEmpty(localize.key))
+                        return Localization.GetWithDefault(localize.key);
+                    return label.Parser.ParsedText;
+                }
+            }
+        }
+
+        return null;
+    }
+
     public void OnKeyChoice(GameObject go, KeyCode key)
     {
         if (ButtonGroupState.ActiveGroup == ConfigGroupButton)
@@ -992,14 +1081,43 @@ public class ConfigUI : UIScene
             {
                 var step = configField.ConfigChoice[0].GetComponent<UISlider>().numberOfSteps - 1;
                 if (key == KeyCode.LeftArrow)
+                {
                     setConfigValue(configField.ConfigParent, configField.Value - 1f / step, false);
+                    // Announce new value for screen readers
+                    AnnounceSettingValueChange(configField);
+                }
                 else if (key == KeyCode.RightArrow)
+                {
                     setConfigValue(configField.ConfigParent, configField.Value + 1f / step, false);
+                    // Announce new value for screen readers
+                    AnnounceSettingValueChange(configField);
+                }
             }
             else if (configField.Configurator != Configurator.CombatTutorial && configField.Configurator != Configurator.ControlTutorial && configField.Configurator != Configurator.Title && configField.Configurator != Configurator.QuitGame && (key == KeyCode.LeftArrow || key == KeyCode.RightArrow))
             {
                 setConfigValue(configField.ConfigParent, ((Int32)configField.Value + 1) % 2, false);
+
+                // Announce new value for screen readers
+                AnnounceSettingValueChange(configField);
             }
+        }
+    }
+
+    /// <summary>Announce the updated setting value for screen readers</summary>
+    private void AnnounceSettingValueChange(ConfigField configField)
+    {
+        try
+        {
+            String valueText = GetConfigValueText(configField);
+            if (!String.IsNullOrEmpty(valueText))
+            {
+                Memoria.ScreenReader.ScreenReaderManager.Instance.Speak(valueText, true);
+            }
+        }
+        catch (Exception e)
+        {
+            // Silently fail - don't break the game if screen reader has issues
+            Log.Error("Screen reader value announcement failed: " + e.Message);
         }
     }
 
