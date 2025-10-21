@@ -507,10 +507,44 @@ public class BubbleUI : Singleton<BubbleUI>
 
     public static readonly Vector3 UIDefaultOffset = new Vector3(0f, 50f, 0f);
 
+    // ACCESSIBILITY: Track last frame for debouncing hotkey input
+    private int _lastToggleFrame = -1;
+
+    // ACCESSIBILITY: Check for toggle hotkey
+    private void Update()
+    {
+        // Check for '0' key to toggle icon announcements
+        if (Input.GetKeyDown(KeyCode.Alpha0))
+        {
+            // Prevent processing the same key press multiple times in the same frame
+            int currentFrame = Time.frameCount;
+            if (currentFrame == _lastToggleFrame)
+                return;
+
+            _lastToggleFrame = currentFrame;
+
+            // Toggle the setting
+            Configuration.Accessibility.AnnounceIcons = !Configuration.Accessibility.AnnounceIcons;
+
+            // Save to INI file
+            Configuration.Accessibility.SaveValues();
+
+            // Announce the new state
+            string state = Configuration.Accessibility.AnnounceIcons ? "on" : "off";
+            Memoria.ScreenReader.ScreenReaderManager.Instance.Speak("Icon reading " + state, interrupt: true);
+
+            Log.Message("[BubbleUI] Icon announcements toggled: " + state);
+        }
+    }
+
     // ACCESSIBILITY: Announce interaction bubbles via screen reader
     private void AnnounceInteractionBubble(Obj coll, BubbleUI.Flag[] flags)
     {
         if (flags == null || flags.Length == 0)
+            return;
+
+        // Check if icon announcements are enabled
+        if (!Configuration.Accessibility.AnnounceIcons)
             return;
 
         try
