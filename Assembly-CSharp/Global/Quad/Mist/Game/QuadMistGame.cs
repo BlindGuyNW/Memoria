@@ -7,6 +7,7 @@ using Assets.Scripts.Common;
 using Memoria;
 using Memoria.Assets;
 using Memoria.Data;
+using Memoria.ScreenReader;
 using UnityEngine;
 using Object = UnityEngine.Object;
 using Random = UnityEngine.Random;
@@ -156,6 +157,9 @@ public class QuadMistGame : MonoBehaviour
         FF9Snd.ff9minisnd_song_play(66);
         StackCardInfo = new QuadMistCard();
         StackCardCount = 0;
+
+        // Initialize screen reader for accessibility
+        ScreenReaderManager.Instance.Initialize();
     }
 
     private void InitResources()
@@ -351,6 +355,9 @@ public class QuadMistGame : MonoBehaviour
                 yourTurn = side == 0;
                 AnimCoroutine(Anim.Enable(coin.gameObject), coin.Toss(side), Anim.Disable(coin.gameObject));
                 playerTurnCount = 0;
+
+                // Announce whose turn it is
+                ScreenReaderManager.Instance.Speak(yourTurn ? "Your turn" : "Enemy turn", interrupt: false);
                 hasShowTutorial02 = false;
                 hasShowTutorial03 = false;
                 GameState = GAME_STATE.PLAY;
@@ -423,16 +430,39 @@ public class QuadMistGame : MonoBehaviour
                     QuadMistCard defender = _battleResult.defender;
                     _battleResult.calculation = Calculate(attacker, defender);
                     _battleResult.type = _battleResult.calculation.atkFinish <= _battleResult.calculation.defFinish ? BattleResult.Type.LOSE : BattleResult.Type.WIN;
+
+                    // Announce battle result for screen readers
+                    String attackerName = QuadMistAccessibility.GetCardName(attacker.id);
+                    String defenderName = QuadMistAccessibility.GetCardName(defender.id);
+                    String attackerOwner = attacker.side == 0 ? "Your" : "Enemy";
+                    String defenderOwner = defender.side == 0 ? "your" : "enemy";
+
                     if (_battleResult.type == BattleResult.Type.WIN)
                     {
                         _battleResult.combos = GenerateCombo(_battleResult.defender, attacker.side);
                         RemoveComboFromBeatable(_battleResult.combos);
+
+                        // Announce battle won
+                        String battleAnnouncement = $"{attackerOwner} {attackerName} defeats {defenderOwner} {defenderName}";
+                        if (_battleResult.combos.Length > 0)
+                        {
+                            battleAnnouncement += $", {_battleResult.combos.Length} combo {(_battleResult.combos.Length == 1 ? "card" : "cards")} flipped";
+                        }
+                        ScreenReaderManager.Instance.Speak(battleAnnouncement, interrupt: false);
                     }
                     else
                     {
                         _battleResult.combos = GenerateCombo(_battleResult.attacker, defender.side);
                         _beatableTargets.Clear();
+
+                        // Announce battle lost
+                        String battleAnnouncement = $"{attackerOwner} {attackerName} loses to {defenderOwner} {defenderName}";
+                        ScreenReaderManager.Instance.Speak(battleAnnouncement, interrupt: false);
                     }
+
+                    // Announce score once after battle
+                    String scoreAnnouncement = QuadMistAccessibility.GetScoreAnnouncement(playerScore, enemyScore);
+                    ScreenReaderManager.Instance.Speak(scoreAnnouncement, interrupt: false);
                 }
                 else
                 {
@@ -455,6 +485,9 @@ public class QuadMistGame : MonoBehaviour
                 yourTurn = !yourTurn;
                 PlayState = !yourTurn ? PLAY_STATE.INPUT_ENEMY : PLAY_STATE.INPUT_PLAYER;
                 _battleResult.defender = null;
+
+                // Announce whose turn it is after battle
+                ScreenReaderManager.Instance.Speak(yourTurn ? "Your turn" : "Enemy turn", interrupt: false);
                 if (Configuration.TetraMaster.TripleTriad >= 2 && enemyHand.Count == 0) // Fix a minor issue when player starts (his last card placed on board automatically)
                 {
                     ++GameState;
@@ -887,6 +920,12 @@ public class QuadMistGame : MonoBehaviour
                 PlaceCard(inputResult.x, inputResult.y, inputResult.selectedCard);
                 GenerateTargetable(inputResult.x, inputResult.y);
                 _battleResult.attacker = inputResult.selectedCard;
+
+                // Announce enemy card placement for screen readers
+                String position = QuadMistAccessibility.ConvertToChessNotation(inputResult.x, inputResult.y);
+                String cardName = QuadMistAccessibility.GetCardName(inputResult.selectedCard.id);
+                ScreenReaderManager.Instance.Speak($"Enemy plays {cardName} at {position}", interrupt: false);
+
                 ++InputState;
                 break;
             case INPUT_STATE.SELECT_BATTLE_TARGET:

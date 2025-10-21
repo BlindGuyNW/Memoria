@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Memoria.ScreenReader;
+using System;
 using UnityEngine;
 
 public class ResultText : MonoBehaviour
@@ -11,6 +12,23 @@ public class ResultText : MonoBehaviour
             this.shadow.ID = value;
             this.content.transform.localPosition = this.map[value];
             this.shadow.transform.localPosition = this.map[value] + new Vector3(-0f, 0f, 0.1f);
+
+            // Announce result for screen readers
+            String resultText = GetResultText(value);
+            String announcement = QuadMistAccessibility.GetResultAnnouncement(resultText);
+            ScreenReaderManager.Instance.Speak(announcement, interrupt: false);
+        }
+    }
+
+    private String GetResultText(Int32 id)
+    {
+        switch (id)
+        {
+            case 0: return "WIN";
+            case 1: return "LOSE";
+            case 2: return "DRAW";
+            case 3: return "PERFECT";
+            default: return "UNKNOWN";
         }
     }
 

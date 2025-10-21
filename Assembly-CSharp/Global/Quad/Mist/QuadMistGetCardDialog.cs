@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Memoria.ScreenReader;
+using System;
 using UnityEngine;
 
 public class QuadMistGetCardDialog : MonoBehaviour
@@ -20,6 +21,10 @@ public class QuadMistGetCardDialog : MonoBehaviour
         }
         QuadMistGetCardDialog.main.dialog = Singleton<DialogManager>.Instance.AttachDialog($"[STRT=0,1][CENT][NANI][IMME]{message}[TIME=-1]", 0, 1, Dialog.TailPosition.AutoPosition, Dialog.WindowStyle.WindowStylePlain, new Vector2(10000f, 10000f), Dialog.CaptionType.None);
         QuadMistGetCardDialog.main.dialog.transform.localPosition = new Vector3(0f, -220f);
+
+        // Announce card won/lost dialog for screen readers
+        // The dialog system will handle text cleaning, but we announce the raw message
+        ScreenReaderManager.Instance.Speak(message, interrupt: false);
     }
 
     public static void Hide()

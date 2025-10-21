@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Memoria.ScreenReader;
+using System;
 using UnityEngine;
 
 public class QuadMistConfirmDialog : MonoBehaviour
@@ -31,6 +32,10 @@ public class QuadMistConfirmDialog : MonoBehaviour
                     QuadMistConfirmDialog.main.cancelMesh.color = Color.gray;
                 }
             }
+
+            // Announce selection change for screen readers
+            String selectedOption = Select ? "OK" : "Cancel";
+            ScreenReaderManager.Instance.Speak(selectedOption, interrupt: true);
         }
     }
 
@@ -64,6 +69,9 @@ public class QuadMistConfirmDialog : MonoBehaviour
         QuadMistConfirmDialog.main.message.text = msg;
         QuadMistConfirmDialog.main.highlight = highlight;
         QuadMistConfirmDialog.main.Select = select;
+
+        // Announce confirmation dialog message for screen readers
+        ScreenReaderManager.Instance.Speak(msg, interrupt: false);
     }
 
     public static void MessageHide()

@@ -888,6 +888,7 @@
     <Compile Include="Global\Quad\Mist\Debug\QuadMistDebugMenu.cs" />
     <Compile Include="Global\Quad\Mist\Game\QuadMistGame.cs" />
     <Compile Include="Global\Quad\Mist\Game\QuadMistGameResourceMapper.cs" />
+    <Compile Include="Global\Quad\Mist\QuadMistAccessibility.cs" />
     <Compile Include="Global\Quad\Mist\QuadMistAssetData.cs" />
     <Compile Include="Global\Quad\Mist\QuadMistCameraController.cs" />
     <Compile Include="Global\Quad\Mist\QuadMistConfiguration.cs" />

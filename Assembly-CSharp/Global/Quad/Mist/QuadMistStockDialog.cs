@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Memoria.ScreenReader;
+using System;
 using UnityEngine;
 
 public class QuadMistStockDialog : MonoBehaviour
@@ -18,6 +19,9 @@ public class QuadMistStockDialog : MonoBehaviour
         }
         QuadMistStockDialog.main.dialog = Singleton<DialogManager>.Instance.AttachDialog($"[STRT=0,1][CENT][NANI][IMME]{message}[TIME=-1]", 0, 1, Dialog.TailPosition.AutoPosition, Dialog.WindowStyle.WindowStylePlain, new Vector2(10000f, 10000f), Dialog.CaptionType.None);
         QuadMistStockDialog.main.dialog.transform.localPosition = new Vector3(-235f, 290f + (position.y - 0.6003987f) * 3.125f * 155f);
+
+        // Announce duplicate card count for screen readers
+        ScreenReaderManager.Instance.Speak(message, interrupt: false);
     }
 
     public static void Hide()

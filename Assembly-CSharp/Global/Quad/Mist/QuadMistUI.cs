@@ -2,6 +2,8 @@ using Assets.Sources.Scripts.UI.Common;
 using Memoria;
 using Memoria.Assets;
 using Memoria.Data;
+using Memoria.Prime;
+using Memoria.ScreenReader;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -629,6 +631,65 @@ public class QuadMistUI : UIScene
     public static List<QuadMistCard> allCardList = new List<QuadMistCard>();
 
     private Byte[] count = new Byte[CardPool.TOTAL_CARDS];
+
+    /// <summary>
+    /// Override to provide screen reader accessibility for card selection
+    /// </summary>
+    protected override void AnnounceButtonForScreenReader(GameObject go)
+    {
+        try
+        {
+            // Check if this is a card icon button
+            QuadMistUI.CardListHUD cardHud = cardHudList.FirstOrDefault(hud => hud.Self == go);
+            if (cardHud != null)
+            {
+                Int32 cardId = cardHud.Id;
+                Byte cardCount = count[cardId];
+
+                // Get card name
+                String cardName = FF9TextTool.CardName((TetraMasterCardId)cardId);
+
+                // Build announcement
+                String announcement;
+                if (cardCount > 0)
+                {
+                    // Get card details from the first card of this type
+                    QuadMistCard card = GetCardInfo(cardId, 0);
+                    if (card != null)
+                    {
+                        announcement = QuadMistAccessibility.GetCardDescription(card);
+
+                        // Add count if we have more than one
+                        if (cardCount > 1)
+                        {
+                            announcement += $", {cardCount} owned";
+                        }
+                    }
+                    else
+                    {
+                        announcement = $"{cardName}, {cardCount} {(cardCount == 1 ? "card" : "cards")} owned";
+                    }
+                }
+                else
+                {
+                    announcement = $"{cardName}, none owned";
+                }
+
+                ScreenReaderManager.Instance.Speak(announcement, false);
+            }
+            else
+            {
+                // Fall back to default behavior for non-card buttons
+                base.AnnounceButtonForScreenReader(go);
+            }
+        }
+        catch (Exception e)
+        {
+            Log.Error("QuadMistUI screen reader announcement failed: " + e.Message);
+            // Fall back to default behavior
+            base.AnnounceButtonForScreenReader(go);
+        }
+    }
 
     public class CardListHUD
     {

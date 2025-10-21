@@ -1423,20 +1423,6 @@ public class TitleUI : UIScene
         PersistenSingleton<UIManager>.Instance.WorldHUDScene.EnableContinentTitle(false);
     }
 
-    private void OnDestroy()
-    {
-        // Shutdown screen reader support
-        try
-        {
-            ScreenReaderManager.Instance.Shutdown();
-        }
-        catch (Exception e)
-        {
-            Log.Error("Failed to shutdown screen reader support");
-            Log.Error(e);
-        }
-    }
-
     private void Awake()
     {
         ExpansionVerifier.printLog("TitleUI: awake lang = " + Localization.CurrentSymbol);

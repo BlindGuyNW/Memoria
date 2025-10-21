@@ -1,4 +1,5 @@
 ﻿using Memoria;
+using Memoria.ScreenReader;
 using System;
 using System.Collections.Generic;
 using UnityEngine;
@@ -37,16 +38,46 @@ public class ButtonInputHandler : InputHandler
         {
             preBoard.SetPreviewCardID(this.preSelect);
             this.launched = true;
+
+            // Announce the card being previewed for screen readers
+            Int32 cardCount = preBoard.CountSelected();
+            String cardName = QuadMistAccessibility.GetCardName((Memoria.Data.TetraMasterCardId)this.preSelect);
+            String announcement = cardCount > 0
+                ? $"{cardName}, {cardCount} {(cardCount == 1 ? "card" : "cards")} owned"
+                : $"{cardName}, none owned";
+
+            // Add preview details if available
+            if (cardCount > 0 && preBoard.Preview != null)
+            {
+                String cardDetails = QuadMistAccessibility.GetCardDescription(preBoard.Preview);
+                announcement = cardDetails;
+            }
+
+            ScreenReaderManager.Instance.Speak(announcement, interrupt: true);
         }
         if (UIManager.Input.GetKey(Control.LeftBumper))
         {
             preBoard.PrevCard();
             SoundEffect.Play(QuadMistSoundID.MINI_SE_CARD_MOVE);
+
+            // Announce the new card variant for screen readers
+            if (preBoard.Preview != null)
+            {
+                String cardDetails = QuadMistAccessibility.GetCardDescription(preBoard.Preview);
+                ScreenReaderManager.Instance.Speak(cardDetails, interrupt: true);
+            }
         }
         if (UIManager.Input.GetKey(Control.RightBumper))
         {
             preBoard.NextCard();
             SoundEffect.Play(QuadMistSoundID.MINI_SE_CARD_MOVE);
+
+            // Announce the new card variant for screen readers
+            if (preBoard.Preview != null)
+            {
+                String cardDetails = QuadMistAccessibility.GetCardDescription(preBoard.Preview);
+                ScreenReaderManager.Instance.Speak(cardDetails, interrupt: true);
+            }
         }
         if (UIManager.Input.GetKey(Control.Confirm))
         {
@@ -54,6 +85,12 @@ public class ButtonInputHandler : InputHandler
             {
                 QuadMistCard item = preBoard.RemoveSelected();
                 playerHand.Add(item);
+
+                // Announce card added to hand for screen readers
+                String cardName = QuadMistAccessibility.GetCardName(item.id);
+                String announcement = $"Added {cardName} to hand, {playerHand.Count} of 5 selected";
+                ScreenReaderManager.Instance.Speak(announcement, interrupt: false);
+
                 if (playerHand.Count == 5)
                 {
                     result.Used();
@@ -63,6 +100,9 @@ public class ButtonInputHandler : InputHandler
             }
             else if (playerHand.Count == 5)
             {
+                // Announce that hand is full
+                ScreenReaderManager.Instance.Speak("Hand is full, 5 cards selected", interrupt: false);
+
                 result.Used();
                 this.launched = false;
                 return;
@@ -81,8 +121,14 @@ public class ButtonInputHandler : InputHandler
             Int32 num = playerHand.Count - 1;
             if (num >= 0)
             {
-                preBoard.Add(playerHand[num]);
+                QuadMistCard removedCard = playerHand[num];
+                preBoard.Add(removedCard);
                 playerHand.RemoveAt(num);
+
+                // Announce card removed from hand for screen readers
+                String cardName = QuadMistAccessibility.GetCardName(removedCard.id);
+                String announcement = $"Removed {cardName} from hand, {playerHand.Count} of 5 selected";
+                ScreenReaderManager.Instance.Speak(announcement, interrupt: false);
             }
             SoundEffect.Play(QuadMistSoundID.MINI_SE_CANCEL);
         }
@@ -136,6 +182,11 @@ public class ButtonInputHandler : InputHandler
                     QuadMistGame.main.CardNameDialogSlider.ShowCardNameDialog(playerHand);
                 else
                     QuadMistGame.main.CardNameDialogSlider.HideCardNameDialog(playerHand);
+
+                // Announce selected card for screen readers
+                QuadMistCard selectedCard = playerHand[this.playSelect];
+                String cardDesc = QuadMistAccessibility.GetCardDescription(selectedCard);
+                ScreenReaderManager.Instance.Speak(cardDesc, interrupt: true);
             }
             if (UIManager.Input.GetKeyTrigger(Control.Confirm))
             {
@@ -179,7 +230,13 @@ public class ButtonInputHandler : InputHandler
                 this.delegateInputHandler.LastActiveInputHandler = InputDelegatorHandler.InputType.Keyboard;
             }
             if (changeSelection)
+            {
                 SoundEffect.Play(QuadMistSoundID.MINI_SE_CURSOL);
+
+                // Announce board position for screen readers
+                String posDesc = QuadMistAccessibility.GetBoardPositionDescription(board, this.boardSelectX, this.boardSelectY);
+                ScreenReaderManager.Instance.Speak(posDesc, interrupt: true);
+            }
             if (this.prevBoardSelectX != this.boardSelectX || this.prevBoardSelectY != this.boardSelectY || !this.launched)
             {
                 Vector2 boardCursorPosition = new Vector2(this.boardSelectX, this.boardSelectY);
