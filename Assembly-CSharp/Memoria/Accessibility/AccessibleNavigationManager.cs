@@ -23,6 +23,7 @@ namespace Memoria.Accessibility
         private int _currentWaypointIndex = 0;
         private int _currentMapId = -1;
         private bool _useDirectNavigation = false; // True when waypoint path failed, use compass guidance instead
+        private int _lastInputFrame = -1; // Track last frame we processed input to prevent duplicate key presses
 
         public class InteractiveObject
         {
@@ -57,6 +58,11 @@ namespace Memoria.Accessibility
             _nearbyObjects.Clear();
             _currentSelection = -1;
             _playerController = null;
+            _trackedTarget = null;
+            _pathWaypoints.Clear();
+            _currentWaypointIndex = 0;
+            _useDirectNavigation = false;
+            _lastInputFrame = -1;
         }
 
         private void TryFindPlayer()
@@ -111,6 +117,10 @@ namespace Memoria.Accessibility
             _currentSelection = -1;
             _playerController = null;
             _currentMapId = -1;
+            _trackedTarget = null;
+            _pathWaypoints.Clear();
+            _currentWaypointIndex = 0;
+            _useDirectNavigation = false;
         }
 
         private void CheckForMapChange()
@@ -161,6 +171,10 @@ namespace Memoria.Accessibility
             if (!_isEnabled)
                 return;
 
+            // Don't run on world map - WorldMapAccessibilityManager handles that
+            if (ff9.w_moveActorPtr != null)
+                return;
+
             // Keep trying to find the player until we succeed
             TryFindPlayer();
 
@@ -170,6 +184,12 @@ namespace Memoria.Accessibility
             // Update tracked target guidance
             UpdateTrackedTarget();
 
+            // Prevent processing input multiple times in the same frame
+            // This fixes the issue where a single key press gets detected multiple times
+            int currentFrame = Time.frameCount;
+            if (currentFrame == _lastInputFrame)
+                return;
+
             // Try multiple key options since the game may intercept some
             // Option 1: [ and ] for cycling, \ for walk-to, ' for rescan
             // Option 2: PageUp/PageDown for cycling, Home for walk-to, Quote for rescan
@@ -177,31 +197,37 @@ namespace Memoria.Accessibility
 
             if (Input.GetKeyDown(KeyCode.LeftBracket) || Input.GetKeyDown(KeyCode.PageUp) || Input.GetKeyDown(KeyCode.Insert))
             {
+                _lastInputFrame = currentFrame;
                 Log.Message("[AccessibleNavigation] Previous key pressed");
                 CyclePrevious();
             }
             else if (Input.GetKeyDown(KeyCode.RightBracket) || Input.GetKeyDown(KeyCode.PageDown) || Input.GetKeyDown(KeyCode.Delete))
             {
+                _lastInputFrame = currentFrame;
                 Log.Message("[AccessibleNavigation] Next key pressed");
                 CycleNext();
             }
             else if (Input.GetKeyDown(KeyCode.Backslash) || Input.GetKeyDown(KeyCode.Home) || Input.GetKeyDown(KeyCode.End))
             {
+                _lastInputFrame = currentFrame;
                 Log.Message("[AccessibleNavigation] Walk-to toggle key pressed");
                 ToggleNavigationGuidance();
             }
             else if (Input.GetKeyDown(KeyCode.Quote))
             {
+                _lastInputFrame = currentFrame;
                 Log.Message("[AccessibleNavigation] Rescan key pressed");
                 ForceRescan();
             }
             else if (Input.GetKeyDown(KeyCode.F9))
             {
+                _lastInputFrame = currentFrame;
                 Log.Message("[AccessibleNavigation] Debug dump key pressed");
                 DumpAllObjects();
             }
             else if ((Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)) && Input.GetKeyDown(KeyCode.Return))
             {
+                _lastInputFrame = currentFrame;
                 Log.Message("[AccessibleNavigation] Ctrl+Enter pressed - teleporting to target");
                 TeleportToSelectedObject();
             }
