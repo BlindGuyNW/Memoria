@@ -231,6 +231,18 @@ namespace Memoria.Accessibility
                 Log.Message("[AccessibleNavigation] Ctrl+Enter pressed - teleporting to target");
                 TeleportToSelectedObject();
             }
+            else if (Input.GetKeyDown(KeyCode.Minus) || Input.GetKeyDown(KeyCode.KeypadMinus))
+            {
+                _lastInputFrame = currentFrame;
+                Log.Message("[AccessibleNavigation] Minus key pressed - decreasing update interval");
+                DecreaseUpdateInterval();
+            }
+            else if (Input.GetKeyDown(KeyCode.Equals) || Input.GetKeyDown(KeyCode.KeypadPlus))
+            {
+                _lastInputFrame = currentFrame;
+                Log.Message("[AccessibleNavigation] Equals key pressed - increasing update interval");
+                IncreaseUpdateInterval();
+            }
         }
 
         private void ScanNearbyObjects()
@@ -1384,74 +1396,32 @@ namespace Memoria.Accessibility
                 }
             }
 
-            // Prefer triangles on the same floor
-            if (closestTriIdx != -1)
-            {
-                WalkMeshTriangle tri = walkMesh.tris[closestTriIdx];
-                Log.Message("[AccessibleNavigation] Found walkable triangle on same floor: horizontal_dist={0:F0}, playerY={1:F0}, triY={2:F0}",
-                    closestDist, playerPos.y, tri.originalCenter.y);
-                return closestTriIdx;
-            }
-
-            // Fall back to any triangle if nothing on the same floor
-            if (closestFallbackTriIdx != -1)
-            {
-                WalkMeshTriangle tri = walkMesh.tris[closestFallbackTriIdx];
-                Log.Message("[AccessibleNavigation] No triangle on same floor, using nearest: horizontal_dist={0:F0}, playerY={1:F0}, triY={2:F0} (DIFFERENT FLOOR!)",
-                    closestFallbackDist, playerPos.y, tri.originalCenter.y);
-                return closestFallbackTriIdx;
-            }
-
-            Log.Message("[AccessibleNavigation] No walkable triangles found");
-            return -1;
+            // Prefer triangles on the same floor, otherwise use fallback
+            return closestTriIdx != -1 ? closestTriIdx : closestFallbackTriIdx;
         }
 
         /// <summary>
-        /// Validates that a path doesn't have unreasonable jumps between consecutive waypoints.
-        /// This catches "teleport" edges in the walkmesh (like entrance/exit pairs) that are
-        /// marked as neighbors but are physically far apart.
+        /// Validates a path from FindPathReversed. The game accepts any non-NULL path,
+        /// but we reject 1-waypoint cross-floor paths which are door/teleport shortcuts.
         /// </summary>
-        private bool ValidatePathWaypoints(WalkMeshTriangle path, Vector3 targetPos)
+        /// <param name="path">The path returned by FindPathReversed</param>
+        /// <param name="currentTri">The player's current triangle</param>
+        /// <param name="targetTri">The target triangle we're trying to reach</param>
+        private bool ValidatePathWaypoints(WalkMeshTriangle path, WalkMeshTriangle currentTri, WalkMeshTriangle targetTri)
         {
             if (path == null)
                 return false;
 
-            // Maximum horizontal distance allowed between consecutive waypoints
-            // If two waypoints are further apart than this, it's likely a teleport edge
-            const float MAX_WAYPOINT_JUMP = 1500f;
+            // Count waypoints in the path
+            int totalWaypoints = 0;
+            for (WalkMeshTriangle t = path; t != null; t = t.next)
+                totalWaypoints++;
 
-            WalkMeshTriangle current = path;
-            Vector3 prevPos = current.originalCenter;
-
-            while (current.next != null)
+            // CRITICAL: Cross-floor paths with only 1 waypoint are ALWAYS door shortcuts
+            // The walkmesh uses these as map transitions - we need to walk TO doors, not THROUGH them
+            if (totalWaypoints == 1 && currentTri.floorIdx != targetTri.floorIdx)
             {
-                current = current.next;
-                Vector3 currentPos = current.originalCenter;
-
-                // Calculate horizontal (XZ plane) distance between consecutive waypoints
-                Vector3 prevPos2D = new Vector3(prevPos.x, 0, prevPos.z);
-                Vector3 currentPos2D = new Vector3(currentPos.x, 0, currentPos.z);
-                float jumpDist = Vector3.Distance(prevPos2D, currentPos2D);
-
-                if (jumpDist > MAX_WAYPOINT_JUMP)
-                {
-                    Log.Message("[AccessibleNavigation] Invalid path edge: {0:F0} units between waypoints (max {1:F0})",
-                        jumpDist, MAX_WAYPOINT_JUMP);
-                    return false;
-                }
-
-                prevPos = currentPos;
-            }
-
-            // Also check the final jump to the target position
-            Vector3 lastPos2D = new Vector3(prevPos.x, 0, prevPos.z);
-            Vector3 targetPos2D = new Vector3(targetPos.x, 0, targetPos.z);
-            float finalJumpDist = Vector3.Distance(lastPos2D, targetPos2D);
-
-            if (finalJumpDist > MAX_WAYPOINT_JUMP)
-            {
-                Log.Message("[AccessibleNavigation] Invalid final path edge: {0:F0} units to target (max {1:F0})",
-                    finalJumpDist, MAX_WAYPOINT_JUMP);
+                Log.Message("[AccessibleNavigation] Rejected 1-waypoint cross-floor path (door shortcut)");
                 return false;
             }
 
@@ -1460,39 +1430,96 @@ namespace Memoria.Accessibility
 
         private bool TestPathfinding(Vector3 targetPos)
         {
+            Log.Message("[AccessibleNavigation] ===== TestPathfinding START =====");
+            Log.Message("[AccessibleNavigation] Target position: ({0:F1}, {1:F1}, {2:F1})",
+                targetPos.x, targetPos.y, targetPos.z);
+
             WalkMesh walkMesh = _playerController.walkMesh;
             if (walkMesh == null)
+            {
+                Log.Warning("[AccessibleNavigation] TestPathfinding FAILED: Walkmesh is null");
                 return false;
+            }
+
+            // Log player's current state
+            Log.Message("[AccessibleNavigation] Player position: ({0:F1}, {1:F1}, {2:F1})",
+                _playerController.curPos.x, _playerController.curPos.y, _playerController.curPos.z);
+            Log.Message("[AccessibleNavigation] Player activeTri: {0}, activeFloor: {1}, radius: {2:F1}",
+                _playerController.activeTri, _playerController.activeFloor, _playerController.radius);
 
             // Find a walkable triangle near the target (using horizontal distance)
             int targetTriIdx = FindNearbyWalkableTriangle(targetPos);
             if (targetTriIdx == -1)
-                return false; // Can't find any walkable triangle nearby
+            {
+                Log.Warning("[AccessibleNavigation] TestPathfinding FAILED: No walkable triangle found near target");
+                return false;
+            }
 
             // Now test if we can path to that triangle
             WalkMeshTriangle targetTri = walkMesh.tris[targetTriIdx];
             WalkMeshTriangle currentTri = walkMesh.tris[_playerController.activeTri];
 
+            Log.Message("[AccessibleNavigation] Current triangle: idx={0} floor={1} center=({2:F1}, {3:F1}, {4:F1})",
+                _playerController.activeTri, currentTri.floorIdx,
+                currentTri.originalCenter.x, currentTri.originalCenter.y, currentTri.originalCenter.z);
+            Log.Message("[AccessibleNavigation] Target triangle: idx={0} floor={1} center=({2:F1}, {3:F1}, {4:F1})",
+                targetTriIdx, targetTri.floorIdx,
+                targetTri.originalCenter.x, targetTri.originalCenter.y, targetTri.originalCenter.z);
+
+            // Log neighbors
+            Log.Message("[AccessibleNavigation] Current tri neighbors: [{0}, {1}, {2}]",
+                currentTri.neighborIdx[0], currentTri.neighborIdx[1], currentTri.neighborIdx[2]);
+            Log.Message("[AccessibleNavigation] Target tri neighbors: [{0}, {1}, {2}]",
+                targetTri.neighborIdx[0], targetTri.neighborIdx[1], targetTri.neighborIdx[2]);
+
             // Try BOTH directions like the game does - A* can behave differently based on direction
+            Log.Message("[AccessibleNavigation] Trying FindPathReversed(target→current)...");
             WalkMeshTriangle path1 = walkMesh.FindPathReversed(targetTri, currentTri, _playerController.radius);
+
+            Log.Message("[AccessibleNavigation] Trying FindPathReversed(current→target)...");
             WalkMeshTriangle path2 = walkMesh.FindPathReversed(currentTri, targetTri, _playerController.radius);
 
-            if (path1 != null || path2 != null)
+            Log.Message("[AccessibleNavigation] Path1 result: {0}", path1 != null ? "SUCCESS" : "NULL");
+            Log.Message("[AccessibleNavigation] Path2 result: {0}", path2 != null ? "SUCCESS" : "NULL");
+
+            // Validate BOTH paths (if they exist) and return true if ANY valid path exists
+            bool anyValidPath = false;
+
+            if (path1 != null)
             {
-                // Found a path, validate it doesn't have unreasonable jumps between waypoints
-                WalkMeshTriangle path = path1 ?? path2;
-
-                // Validate consecutive waypoints aren't too far apart (no teleport edges)
-                if (!ValidatePathWaypoints(path, targetPos))
+                Log.Message("[AccessibleNavigation] Path1 validating...");
+                if (ValidatePathWaypoints(path1, currentTri, targetTri))
                 {
-                    Log.Message("[AccessibleNavigation] Path validation failed - has unreasonable jumps between waypoints");
-                    return false;
+                    Log.Message("[AccessibleNavigation] Path1 is VALID");
+                    anyValidPath = true;
                 }
+                else
+                {
+                    Log.Message("[AccessibleNavigation] Path1 is INVALID");
+                }
+            }
 
-                Log.Message("[AccessibleNavigation] Path is valid");
+            if (path2 != null)
+            {
+                Log.Message("[AccessibleNavigation] Path2 validating...");
+                if (ValidatePathWaypoints(path2, currentTri, targetTri))
+                {
+                    Log.Message("[AccessibleNavigation] Path2 is VALID");
+                    anyValidPath = true;
+                }
+                else
+                {
+                    Log.Message("[AccessibleNavigation] Path2 is INVALID");
+                }
+            }
+
+            if (anyValidPath)
+            {
+                Log.Message("[AccessibleNavigation] TestPathfinding SUCCESS: At least one valid path found");
                 return true;
             }
 
+            Log.Warning("[AccessibleNavigation] TestPathfinding FAILED: No valid paths found");
             return false;
         }
 
@@ -1502,16 +1529,12 @@ namespace Memoria.Accessibility
 
             WalkMesh walkMesh = _playerController.walkMesh;
             if (walkMesh == null)
-            {
-                Log.Warning("[AccessibleNavigation] No walkmesh available");
                 return false;
-            }
 
             // Find a walkable triangle near the target (using horizontal distance)
             int targetTriIdx = FindNearbyWalkableTriangle(targetPos);
             if (targetTriIdx == -1)
             {
-                Log.Message("[AccessibleNavigation] Target not on walkmesh - falling back to direct navigation");
                 _pathWaypoints.Clear();
                 _useDirectNavigation = true; // Use compass-style guidance instead
                 return true; // Still allow navigation, just use direct mode
@@ -1520,57 +1543,91 @@ namespace Memoria.Accessibility
             WalkMeshTriangle targetTri = walkMesh.tris[targetTriIdx];
             WalkMeshTriangle currentTri = walkMesh.tris[_playerController.activeTri];
 
-            // Try BOTH directions like the game does and pick the shorter one
+            // Try BOTH directions like the game does
             WalkMeshTriangle path1 = walkMesh.FindPathReversed(targetTri, currentTri, _playerController.radius);
             WalkMeshTriangle path2 = walkMesh.FindPathReversed(currentTri, targetTri, _playerController.radius);
 
-            // Pick the shorter path (or whichever one exists)
-            WalkMeshTriangle pathResult = null;
-            if (path1 != null && path2 != null)
+            // Smooth BOTH paths and calculate their lengths (like the game does)
+            List<Int32> pathIdxList1 = new List<Int32>();
+            List<Vector3> pathPos1 = new List<Vector3>();
+            float pathLength1 = 0f;
+            bool path1Valid = false;
+
+            if (path1 != null && ValidatePathWaypoints(path1, currentTri, targetTri))
             {
-                // Count path lengths
-                int length1 = 0, length2 = 0;
-                for (WalkMeshTriangle t = path1; t != null; t = t.next) length1++;
-                for (WalkMeshTriangle t = path2; t != null; t = t.next) length2++;
-                pathResult = (length1 <= length2) ? path1 : path2;
+                // Build triangle index list: walk the .next chain
+                WalkMeshTriangle t = path1;
+                while (t != null && t.next != null)
+                {
+                    pathIdxList1.Add(t.triIdx);
+                    t = t.next;
+                }
+                if (t != null)
+                    pathIdxList1.Add(t.triIdx);
+
+                // Smooth using the game's algorithm (Path1 is target→current)
+                pathPos1 = _playerController.SmoothPathsByForce(pathIdxList1, _playerController.curPos, targetPos);
+
+                if (pathPos1 != null && pathPos1.Count > 0)
+                {
+                    // Calculate total path length
+                    for (int i = 1; i < pathPos1.Count; i++)
+                        pathLength1 += Vector3.Distance(pathPos1[i - 1], pathPos1[i]);
+                    path1Valid = true;
+                }
             }
+
+            List<Int32> pathIdxList2 = new List<Int32>();
+            List<Vector3> pathPos2 = new List<Vector3>();
+            float pathLength2 = 0f;
+            bool path2Valid = false;
+
+            if (path2 != null && ValidatePathWaypoints(path2, currentTri, targetTri))
+            {
+                // Build triangle index list: walk the .next chain
+                WalkMeshTriangle t = path2;
+                while (t != null && t.next != null)
+                {
+                    pathIdxList2.Add(t.triIdx);
+                    t = t.next;
+                }
+                if (t != null)
+                    pathIdxList2.Add(t.triIdx);
+
+                // Smooth using the game's algorithm (Path2 is current→target)
+                pathPos2 = _playerController.SmoothPathsByForce(pathIdxList2, targetPos, _playerController.curPos);
+
+                if (pathPos2 != null && pathPos2.Count > 0)
+                {
+                    pathPos2.Reverse();  // CRITICAL: Reverse Path2 like the game does
+
+                    // Calculate total path length
+                    for (int i = 1; i < pathPos2.Count; i++)
+                        pathLength2 += Vector3.Distance(pathPos2[i - 1], pathPos2[i]);
+                    path2Valid = true;
+                }
+            }
+
+            // Pick the shortest VALID smoothed path (like the game does)
+            List<Vector3> chosenPath = null;
+            if (path1Valid && path2Valid)
+                chosenPath = (pathLength1 <= pathLength2) ? pathPos1 : pathPos2;
+            else if (path1Valid)
+                chosenPath = pathPos1;
+            else if (path2Valid)
+                chosenPath = pathPos2;
             else
             {
-                pathResult = path1 ?? path2;
-            }
-
-            if (pathResult == null)
-            {
-                Log.Message("[AccessibleNavigation] No path found - falling back to direct navigation");
+                // No valid paths - fall back to direct navigation
                 _pathWaypoints.Clear();
-                _useDirectNavigation = true; // Use compass-style guidance instead
-                return true; // Still allow navigation, just use direct mode
+                _useDirectNavigation = true;
+                return true;
             }
 
-            // Build waypoint list from triangle centers
-            WalkMeshTriangle tri = pathResult;
-            while (tri != null)
-            {
-                _pathWaypoints.Add(tri.originalCenter);
-                tri = tri.next;
-            }
-
-            // Add final target position as last waypoint
-            // Use the target triangle's Y coordinate instead of the object's Y coordinate
-            // because quads often have Y=0 and we need the actual walkable floor height
-            Vector3 finalWaypoint = new Vector3(targetPos.x, targetTri.originalCenter.y, targetPos.z);
-            _pathWaypoints.Add(finalWaypoint);
-
-            // Validate the path doesn't have unreasonable jumps between waypoints
-            if (!ValidatePathWaypoints(pathResult, targetPos))
-            {
-                Log.Message("[AccessibleNavigation] Path has unreasonable jumps - falling back to direct navigation");
-                _pathWaypoints.Clear();
-                _useDirectNavigation = true; // Use compass-style guidance instead
-                return true; // Still allow navigation, just use direct mode
-            }
-
-            _useDirectNavigation = false; // We have a valid waypoint path
+            // Use the smoothed waypoints
+            _pathWaypoints.Clear();
+            _pathWaypoints.AddRange(chosenPath);
+            _useDirectNavigation = false;
             return _pathWaypoints.Count > 0;
         }
 
@@ -1696,6 +1753,9 @@ namespace Memoria.Accessibility
             if (_trackedTarget == null || _playerController == null)
                 return;
 
+            // Get update interval once at the start
+            float updateInterval = Configuration.Accessibility.NavigationUpdateInterval;
+
             // Direct navigation mode - use compass guidance
             if (_useDirectNavigation)
             {
@@ -1707,15 +1767,14 @@ namespace Memoria.Accessibility
                 if (distance < 100f)
                 {
                     // Close enough - check facing
-                    if (Time.time - _lastDistanceUpdate < 2f)
+                    if (Time.time - _lastDistanceUpdate < updateInterval)
                         return;
                     _lastDistanceUpdate = Time.time;
                     CheckFacingAndAnnounce();
                     return;
                 }
 
-                // Periodic updates - more frequent when close
-                float updateInterval = distance < 500f ? 3f : 5f;
+                // Periodic updates
                 if (Time.time - _lastDistanceUpdate < updateInterval)
                     return;
 
@@ -1731,7 +1790,7 @@ namespace Memoria.Accessibility
             if (_currentWaypointIndex >= _pathWaypoints.Count)
             {
                 // We're at destination, check facing periodically
-                if (Time.time - _lastDistanceUpdate < 2f)
+                if (Time.time - _lastDistanceUpdate < updateInterval)
                     return;
                 _lastDistanceUpdate = Time.time;
                 CheckFacingAndAnnounce();
@@ -1756,8 +1815,8 @@ namespace Memoria.Accessibility
                 }
             }
 
-            // Update every 2 seconds
-            if (Time.time - _lastDistanceUpdate < 2f)
+            // Update periodically
+            if (Time.time - _lastDistanceUpdate < updateInterval)
                 return;
 
             _lastDistanceUpdate = Time.time;
@@ -1825,6 +1884,40 @@ namespace Memoria.Accessibility
                     turnDirection = angleDiff < -45f ? "Turn left" : "Turn slightly left";
 
                 ScreenReaderManager.Instance.Speak(String.Format("{0}. {1}", _trackedTarget.name, turnDirection), false);
+            }
+        }
+
+        private void DecreaseUpdateInterval()
+        {
+            int currentInterval = Configuration.Accessibility.NavigationUpdateInterval;
+            if (currentInterval > 1)
+            {
+                Configuration.Accessibility.NavigationUpdateInterval = currentInterval - 1;
+                Configuration.Accessibility.SaveValues();
+                Log.Message("[AccessibleNavigation] Update interval decreased to {0} seconds", currentInterval - 1);
+                ScreenReaderManager.Instance.Speak(String.Format("Navigation updates every {0} seconds", currentInterval - 1), false);
+            }
+            else
+            {
+                Log.Message("[AccessibleNavigation] Update interval already at minimum (1 second)");
+                ScreenReaderManager.Instance.Speak("Minimum interval: 1 second", false);
+            }
+        }
+
+        private void IncreaseUpdateInterval()
+        {
+            int currentInterval = Configuration.Accessibility.NavigationUpdateInterval;
+            if (currentInterval < 10)
+            {
+                Configuration.Accessibility.NavigationUpdateInterval = currentInterval + 1;
+                Configuration.Accessibility.SaveValues();
+                Log.Message("[AccessibleNavigation] Update interval increased to {0} seconds", currentInterval + 1);
+                ScreenReaderManager.Instance.Speak(String.Format("Navigation updates every {0} seconds", currentInterval + 1), false);
+            }
+            else
+            {
+                Log.Message("[AccessibleNavigation] Update interval already at maximum (10 seconds)");
+                ScreenReaderManager.Instance.Speak("Maximum interval: 10 seconds", false);
             }
         }
     }

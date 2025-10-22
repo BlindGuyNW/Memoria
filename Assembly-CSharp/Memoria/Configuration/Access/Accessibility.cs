@@ -12,9 +12,16 @@ namespace Memoria
                 set => Instance._accessibility.AnnounceIcons.Value = value;
             }
 
+            public static Int32 NavigationUpdateInterval
+            {
+                get => Instance._accessibility.NavigationUpdateInterval;
+                set => Instance._accessibility.NavigationUpdateInterval.Value = value;
+            }
+
             public static void SaveValues()
             {
                 SaveValue(Instance._accessibility.Name, Instance._accessibility.AnnounceIcons);
+                SaveValue(Instance._accessibility.Name, Instance._accessibility.NavigationUpdateInterval);
             }
         }
     }

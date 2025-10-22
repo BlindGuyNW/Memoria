@@ -19,8 +19,6 @@ namespace Memoria.Accessibility
         private NavigationMode _navigationMode = NavigationMode.None;
         private WorldDestination _selectedDestination = null;
         private float _lastGuidanceUpdate = 0f;
-        private const float GUIDANCE_UPDATE_INTERVAL = 5f; // Announce direction every 5 seconds
-        private const float CLOSE_RANGE_DISTANCE = 200f; // Announce more frequently when close
         private const float ARRIVAL_DISTANCE = 400f; // Consider "arrived" when within 400 units
 
         public enum NavigationMode
@@ -135,6 +133,16 @@ namespace Memoria.Accessibility
             else if (Input.GetKeyDown(KeyCode.Escape) && _navigationMode != NavigationMode.None)
             {
                 CancelNavigation();
+            }
+            // - (Minus) - Decrease update interval
+            else if (Input.GetKeyDown(KeyCode.Minus) || Input.GetKeyDown(KeyCode.KeypadMinus))
+            {
+                DecreaseUpdateInterval();
+            }
+            // = (Equals) - Increase update interval
+            else if (Input.GetKeyDown(KeyCode.Equals) || Input.GetKeyDown(KeyCode.KeypadPlus))
+            {
+                IncreaseUpdateInterval();
             }
         }
 
@@ -509,10 +517,8 @@ namespace Memoria.Accessibility
             Vector3 toDestination = destPos - new Vector3(playerPos.x, 0, playerPos.z);
             float currentDistance = toDestination.magnitude;
 
-            // Announce more frequently when close
-            float updateInterval = currentDistance < CLOSE_RANGE_DISTANCE ? 3f : GUIDANCE_UPDATE_INTERVAL;
-
-            // Periodic guidance updates (every 5 seconds, or 3 seconds when close)
+            // Periodic guidance updates
+            float updateInterval = Configuration.Accessibility.NavigationUpdateInterval;
             if (Time.time - _lastGuidanceUpdate >= updateInterval)
             {
                 _lastGuidanceUpdate = Time.time;
@@ -618,6 +624,40 @@ namespace Memoria.Accessibility
             bool isAirship = (controlNo == 7 || controlNo == 8 || controlNo == 9);
 
             return isAirship;
+        }
+
+        private void DecreaseUpdateInterval()
+        {
+            int currentInterval = Configuration.Accessibility.NavigationUpdateInterval;
+            if (currentInterval > 1)
+            {
+                Configuration.Accessibility.NavigationUpdateInterval = currentInterval - 1;
+                Configuration.Accessibility.SaveValues();
+                Log.Message("[WorldMapAccessibility] Update interval decreased to {0} seconds", currentInterval - 1);
+                ScreenReaderManager.Instance.Speak(String.Format("Navigation updates every {0} seconds", currentInterval - 1), false);
+            }
+            else
+            {
+                Log.Message("[WorldMapAccessibility] Update interval already at minimum (1 second)");
+                ScreenReaderManager.Instance.Speak("Minimum interval: 1 second", false);
+            }
+        }
+
+        private void IncreaseUpdateInterval()
+        {
+            int currentInterval = Configuration.Accessibility.NavigationUpdateInterval;
+            if (currentInterval < 10)
+            {
+                Configuration.Accessibility.NavigationUpdateInterval = currentInterval + 1;
+                Configuration.Accessibility.SaveValues();
+                Log.Message("[WorldMapAccessibility] Update interval increased to {0} seconds", currentInterval + 1);
+                ScreenReaderManager.Instance.Speak(String.Format("Navigation updates every {0} seconds", currentInterval + 1), false);
+            }
+            else
+            {
+                Log.Message("[WorldMapAccessibility] Update interval already at maximum (10 seconds)");
+                ScreenReaderManager.Instance.Speak("Maximum interval: 10 seconds", false);
+            }
         }
     }
 }

@@ -1863,7 +1863,7 @@ public partial class FieldMapActorController : HonoBehavior
         return false;
     }
 
-    private List<Vector3> SmoothPathsByForce(List<Int32> pathsIdx, Vector3 start, Vector3 end)
+    public List<Vector3> SmoothPathsByForce(List<Int32> pathsIdx, Vector3 start, Vector3 end)
     {
         if (pathsIdx.Count == 0)
             return null;
