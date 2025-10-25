@@ -904,6 +904,17 @@ public class AbilityUI : UIScene
                         announcement += ", cannot use";
                 }
 
+                // Add AP information
+                if (ff9abil.FF9Abil_HasAp(player))
+                {
+                    Int32 curAP = ff9abil.FF9Abil_GetAp(player, abilId);
+                    Int32 maxAP = ff9abil.FF9Abil_GetMax(player, abilId);
+                    if (curAP >= maxAP)
+                        announcement += ", mastered";
+                    else
+                        announcement += String.Format(", AP {0} of {1}", curAP, maxAP);
+                }
+
                 // Add description (strip formatting codes)
                 if (!String.IsNullOrEmpty(description))
                     announcement += ". " + FF9TextTool.RemoveOpCode(description);
@@ -969,6 +980,17 @@ public class AbilityUI : UIScene
                 }
                 else if (type == AbilityType.Enable)
                     announcement += ", not equipped";
+
+                // Add AP information
+                if (ff9abil.FF9Abil_HasAp(player))
+                {
+                    Int32 curAP = ff9abil.FF9Abil_GetAp(player, abilId);
+                    Int32 maxAP = ff9abil.FF9Abil_GetMax(player, abilId);
+                    if (curAP >= maxAP)
+                        announcement += ", mastered";
+                    else
+                        announcement += String.Format(", AP {0} of {1}", curAP, maxAP);
+                }
 
                 // Add description (strip formatting codes)
                 if (!String.IsNullOrEmpty(description))
