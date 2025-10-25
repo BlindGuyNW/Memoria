@@ -125,6 +125,20 @@ public static class btl_stat
         if (btl.bi.player != 0)
             BattleAchievement.UpdateAbnormalStatus(status);
         BattleVoice.TriggerOnStatusChange(btl, BattleVoice.BattleMoment.Added, statusId);
+
+        // Announce status application to screen reader
+        try
+        {
+            String cleanName = Memoria.Assets.BattleFormatter.GetKey(target.Name);
+            String statusName = GetStatusName(statusId);
+            String announcement = $"{cleanName}: {statusName}";
+            Memoria.ScreenReader.ScreenReaderManager.Instance.Speak(announcement, false);
+        }
+        catch
+        {
+            // Silently fail if screen reader isn't available
+        }
+
         return result;
     }
 
@@ -551,6 +565,78 @@ public static class btl_stat
         stat.conti.Clear();
         stat.partial_resist.Clear();
         stat.duration_factor.Clear();
+    }
+
+    private static String GetStatusName(Memoria.Data.BattleStatusId statusId)
+    {
+        switch (statusId)
+        {
+            case Memoria.Data.BattleStatusId.Petrify: return "Petrified";
+            case Memoria.Data.BattleStatusId.Venom: return "Venomous";
+            case Memoria.Data.BattleStatusId.Virus: return "Virus";
+            case Memoria.Data.BattleStatusId.Silence: return "Silenced";
+            case Memoria.Data.BattleStatusId.Blind: return "Blinded";
+            case Memoria.Data.BattleStatusId.Trouble: return "Trouble";
+            case Memoria.Data.BattleStatusId.Zombie: return "Zombie";
+            case Memoria.Data.BattleStatusId.EasyKill: return "Easy Kill";
+            case Memoria.Data.BattleStatusId.Death: return "KO";
+            case Memoria.Data.BattleStatusId.LowHP: return "Low HP";
+            case Memoria.Data.BattleStatusId.Confuse: return "Confused";
+            case Memoria.Data.BattleStatusId.Berserk: return "Berserk";
+            case Memoria.Data.BattleStatusId.Stop: return "Stopped";
+            case Memoria.Data.BattleStatusId.AutoLife: return "Auto-Life";
+            case Memoria.Data.BattleStatusId.Trance: return "Trance";
+            case Memoria.Data.BattleStatusId.Defend: return "Defending";
+            case Memoria.Data.BattleStatusId.Poison: return "Poisoned";
+            case Memoria.Data.BattleStatusId.Sleep: return "Asleep";
+            case Memoria.Data.BattleStatusId.Regen: return "Regen";
+            case Memoria.Data.BattleStatusId.Haste: return "Haste";
+            case Memoria.Data.BattleStatusId.Slow: return "Slow";
+            case Memoria.Data.BattleStatusId.Float: return "Float";
+            case Memoria.Data.BattleStatusId.Shell: return "Shell";
+            case Memoria.Data.BattleStatusId.Protect: return "Protect";
+            case Memoria.Data.BattleStatusId.Heat: return "Heat";
+            case Memoria.Data.BattleStatusId.Freeze: return "Frozen";
+            case Memoria.Data.BattleStatusId.Vanish: return "Vanish";
+            case Memoria.Data.BattleStatusId.Doom: return "Doom";
+            case Memoria.Data.BattleStatusId.Mini: return "Mini";
+            case Memoria.Data.BattleStatusId.Reflect: return "Reflect";
+            case Memoria.Data.BattleStatusId.Jump: return "Jumping";
+            case Memoria.Data.BattleStatusId.GradualPetrify: return "Gradual Petrify";
+            case Memoria.Data.BattleStatusId.ChangeStat: return "Stat Change";
+            case Memoria.Data.BattleStatusId.CustomStatus1: return "Custom Status 1";
+            case Memoria.Data.BattleStatusId.CustomStatus2: return "Custom Status 2";
+            case Memoria.Data.BattleStatusId.CustomStatus3: return "Custom Status 3";
+            case Memoria.Data.BattleStatusId.CustomStatus4: return "Custom Status 4";
+            case Memoria.Data.BattleStatusId.CustomStatus5: return "Custom Status 5";
+            case Memoria.Data.BattleStatusId.CustomStatus6: return "Custom Status 6";
+            case Memoria.Data.BattleStatusId.CustomStatus7: return "Custom Status 7";
+            case Memoria.Data.BattleStatusId.CustomStatus8: return "Custom Status 8";
+            case Memoria.Data.BattleStatusId.CustomStatus9: return "Custom Status 9";
+            case Memoria.Data.BattleStatusId.CustomStatus10: return "Custom Status 10";
+            case Memoria.Data.BattleStatusId.CustomStatus11: return "Custom Status 11";
+            case Memoria.Data.BattleStatusId.CustomStatus12: return "Custom Status 12";
+            case Memoria.Data.BattleStatusId.CustomStatus13: return "Custom Status 13";
+            case Memoria.Data.BattleStatusId.CustomStatus14: return "Custom Status 14";
+            case Memoria.Data.BattleStatusId.CustomStatus15: return "Custom Status 15";
+            case Memoria.Data.BattleStatusId.CustomStatus16: return "Custom Status 16";
+            case Memoria.Data.BattleStatusId.CustomStatus17: return "Custom Status 17";
+            case Memoria.Data.BattleStatusId.CustomStatus18: return "Custom Status 18";
+            case Memoria.Data.BattleStatusId.CustomStatus19: return "Custom Status 19";
+            case Memoria.Data.BattleStatusId.CustomStatus20: return "Custom Status 20";
+            case Memoria.Data.BattleStatusId.CustomStatus21: return "Custom Status 21";
+            case Memoria.Data.BattleStatusId.CustomStatus22: return "Custom Status 22";
+            case Memoria.Data.BattleStatusId.CustomStatus23: return "Custom Status 23";
+            case Memoria.Data.BattleStatusId.CustomStatus24: return "Custom Status 24";
+            case Memoria.Data.BattleStatusId.CustomStatus25: return "Custom Status 25";
+            case Memoria.Data.BattleStatusId.CustomStatus26: return "Custom Status 26";
+            case Memoria.Data.BattleStatusId.CustomStatus27: return "Custom Status 27";
+            case Memoria.Data.BattleStatusId.CustomStatus28: return "Custom Status 28";
+            case Memoria.Data.BattleStatusId.CustomStatus29: return "Custom Status 29";
+            case Memoria.Data.BattleStatusId.CustomStatus30: return "Custom Status 30";
+            case Memoria.Data.BattleStatusId.CustomStatus31: return "Custom Status 31";
+            default: return statusId.ToString();
+        }
     }
 
     public const UInt32 ALTER_RESIST = 0; // Cannot apply because of status resistance ("Guard")

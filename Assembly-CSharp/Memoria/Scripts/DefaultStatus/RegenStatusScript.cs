@@ -41,6 +41,21 @@ namespace Memoria.DefaultScripts
                 Target.CurrentHp = Math.Min(Target.CurrentHp + heal, Target.MaximumHp);
             }
             btl2d.Btl2dStatReq(Target, isDmg ? (Int32)heal : -(Int32)heal, 0);
+
+            // Announce regen effect to screen reader
+            try
+            {
+                String cleanName = Memoria.Assets.BattleFormatter.GetKey(Target.Name);
+                String announcement = isDmg
+                    ? $"{cleanName}: {heal} HP damage from Regen while Zombie"
+                    : $"{cleanName}: {heal} HP regenerated";
+                Memoria.ScreenReader.ScreenReaderManager.Instance.Speak(announcement, false);
+            }
+            catch
+            {
+                // Silently fail if screen reader isn't available
+            }
+
             BattleVoice.TriggerOnStatusChange(Target, BattleVoice.BattleMoment.Used, BattleStatusId.Regen);
             return false;
         }

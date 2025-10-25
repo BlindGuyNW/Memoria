@@ -40,6 +40,19 @@ namespace Memoria.DefaultScripts
             else
                 Target.Kill(Inflicter);
             btl2d.Btl2dStatReq(Target, (Int32)damage, (Int32)mpdamage);
+
+            // Announce venom damage to screen reader
+            try
+            {
+                String cleanName = Memoria.Assets.BattleFormatter.GetKey(Target.Name);
+                String announcement = $"{cleanName}: {damage} HP and {mpdamage} MP venom damage";
+                Memoria.ScreenReader.ScreenReaderManager.Instance.Speak(announcement, false);
+            }
+            catch
+            {
+                // Silently fail if screen reader isn't available
+            }
+
             BattleVoice.TriggerOnStatusChange(Target, BattleVoice.BattleMoment.Used, BattleStatusId.Venom);
             return false;
         }
