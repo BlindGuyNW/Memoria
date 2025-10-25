@@ -1400,33 +1400,6 @@ namespace Memoria.Accessibility
             return closestTriIdx != -1 ? closestTriIdx : closestFallbackTriIdx;
         }
 
-        /// <summary>
-        /// Validates a path from FindPathReversed. The game accepts any non-NULL path,
-        /// but we reject 1-waypoint cross-floor paths which are door/teleport shortcuts.
-        /// </summary>
-        /// <param name="path">The path returned by FindPathReversed</param>
-        /// <param name="currentTri">The player's current triangle</param>
-        /// <param name="targetTri">The target triangle we're trying to reach</param>
-        private bool ValidatePathWaypoints(WalkMeshTriangle path, WalkMeshTriangle currentTri, WalkMeshTriangle targetTri)
-        {
-            if (path == null)
-                return false;
-
-            // Count waypoints in the path
-            int totalWaypoints = 0;
-            for (WalkMeshTriangle t = path; t != null; t = t.next)
-                totalWaypoints++;
-
-            // CRITICAL: Cross-floor paths with only 1 waypoint are ALWAYS door shortcuts
-            // The walkmesh uses these as map transitions - we need to walk TO doors, not THROUGH them
-            if (totalWaypoints == 1 && currentTri.floorIdx != targetTri.floorIdx)
-            {
-                Log.Message("[AccessibleNavigation] Rejected 1-waypoint cross-floor path (door shortcut)");
-                return false;
-            }
-
-            return true;
-        }
 
         private bool TestPathfinding(Vector3 targetPos)
         {
@@ -1482,44 +1455,14 @@ namespace Memoria.Accessibility
             Log.Message("[AccessibleNavigation] Path1 result: {0}", path1 != null ? "SUCCESS" : "NULL");
             Log.Message("[AccessibleNavigation] Path2 result: {0}", path2 != null ? "SUCCESS" : "NULL");
 
-            // Validate BOTH paths (if they exist) and return true if ANY valid path exists
-            bool anyValidPath = false;
-
-            if (path1 != null)
+            // Accept any non-null path
+            if (path1 != null || path2 != null)
             {
-                Log.Message("[AccessibleNavigation] Path1 validating...");
-                if (ValidatePathWaypoints(path1, currentTri, targetTri))
-                {
-                    Log.Message("[AccessibleNavigation] Path1 is VALID");
-                    anyValidPath = true;
-                }
-                else
-                {
-                    Log.Message("[AccessibleNavigation] Path1 is INVALID");
-                }
-            }
-
-            if (path2 != null)
-            {
-                Log.Message("[AccessibleNavigation] Path2 validating...");
-                if (ValidatePathWaypoints(path2, currentTri, targetTri))
-                {
-                    Log.Message("[AccessibleNavigation] Path2 is VALID");
-                    anyValidPath = true;
-                }
-                else
-                {
-                    Log.Message("[AccessibleNavigation] Path2 is INVALID");
-                }
-            }
-
-            if (anyValidPath)
-            {
-                Log.Message("[AccessibleNavigation] TestPathfinding SUCCESS: At least one valid path found");
+                Log.Message("[AccessibleNavigation] TestPathfinding SUCCESS: At least one path found");
                 return true;
             }
 
-            Log.Warning("[AccessibleNavigation] TestPathfinding FAILED: No valid paths found");
+            Log.Warning("[AccessibleNavigation] TestPathfinding FAILED: No paths found");
             return false;
         }
 
@@ -1553,7 +1496,7 @@ namespace Memoria.Accessibility
             float pathLength1 = 0f;
             bool path1Valid = false;
 
-            if (path1 != null && ValidatePathWaypoints(path1, currentTri, targetTri))
+            if (path1 != null)
             {
                 // Build triangle index list: walk the .next chain
                 WalkMeshTriangle t = path1;
@@ -1582,7 +1525,7 @@ namespace Memoria.Accessibility
             float pathLength2 = 0f;
             bool path2Valid = false;
 
-            if (path2 != null && ValidatePathWaypoints(path2, currentTri, targetTri))
+            if (path2 != null)
             {
                 // Build triangle index list: walk the .next chain
                 WalkMeshTriangle t = path2;
@@ -1631,34 +1574,6 @@ namespace Memoria.Accessibility
             return _pathWaypoints.Count > 0;
         }
 
-        private string GetDirectionGuidance(InteractiveObject target)
-        {
-            Vector3 playerPos = _playerController.curPos;
-            Vector3 toTarget = target.position - playerPos;
-            float distance = toTarget.magnitude;
-
-            // Get direction in world space
-            Vector3 worldDirection = new Vector3(toTarget.x, 0, toTarget.z);
-            if (worldDirection.magnitude < 0.01f)
-                return "You are at the target";
-
-            worldDirection.Normalize();
-
-            // Apply inverse twist to convert from world direction to screen direction
-            float twist = FF9StateSystem.Field.twist.y;
-            Quaternion inverseRotation = Quaternion.Euler(0f, -twist, 0f);
-            Vector3 screenDirection = inverseRotation * worldDirection;
-
-            // Now screenDirection.x = left/right input, screenDirection.z = up/down input
-            float screenX = screenDirection.x;
-            float screenZ = screenDirection.z;
-
-            // Convert to arrow key instructions
-            string directionText = GetArrowKeyDirection(screenX, screenZ);
-            string distanceText = GetDistanceDescription(distance);
-            return String.Format("{0}, {1}", directionText, distanceText);
-        }
-
         private string GetArrowKeyDirection(float x, float z)
         {
             // x: negative = left, positive = right
@@ -1687,8 +1602,42 @@ namespace Memoria.Accessibility
         }
 
         /// <summary>
-        /// Provides direct compass-style navigation guidance (like world map).
-        /// Returns format: "distance direction" (e.g., "500 up-right")
+        /// Formats screen-space offsets into human-readable text.
+        /// </summary>
+        /// <param name="verticalOffset">Z offset in screen space (positive = up, negative = down)</param>
+        /// <param name="horizontalOffset">X offset in screen space (positive = right, negative = left)</param>
+        /// <returns>Formatted string like "up 105, right 2000"</returns>
+        private string FormatScreenOffset(float verticalOffset, float horizontalOffset)
+        {
+            List<string> parts = new List<string>();
+
+            // Format vertical component (up/down)
+            if (Mathf.Abs(verticalOffset) > 1f)
+            {
+                if (verticalOffset > 0)
+                    parts.Add(String.Format("up {0:F0}", verticalOffset));
+                else
+                    parts.Add(String.Format("down {0:F0}", -verticalOffset));
+            }
+
+            // Format horizontal component (left/right)
+            if (Mathf.Abs(horizontalOffset) > 1f)
+            {
+                if (horizontalOffset > 0)
+                    parts.Add(String.Format("right {0:F0}", horizontalOffset));
+                else
+                    parts.Add(String.Format("left {0:F0}", -horizontalOffset));
+            }
+
+            if (parts.Count == 0)
+                return "at destination";
+
+            return String.Join(", ", parts.ToArray());
+        }
+
+        /// <summary>
+        /// Provides direct navigation guidance when pathfinding fails.
+        /// Returns format: "direct: up X, right Y"
         /// </summary>
         private string GetDirectNavigationGuidance()
         {
@@ -1699,24 +1648,21 @@ namespace Memoria.Accessibility
             Vector3 targetPos = _trackedTarget.position;
             Vector3 toTarget = targetPos - playerPos;
 
-            // Calculate horizontal (XZ) distance only
+            // Use horizontal (XZ) offset only
             Vector3 toTarget2D = new Vector3(toTarget.x, 0, toTarget.z);
             float distance = toTarget2D.magnitude;
 
-            if (distance < 0.01f)
+            if (distance < 100f)
                 return "At destination";
 
-            Vector3 worldDirection = toTarget2D.normalized;
-
-            // Apply inverse twist to convert from world direction to screen direction
+            // Apply inverse twist to convert from world space to screen space
             float twist = FF9StateSystem.Field.twist.y;
             Quaternion inverseRotation = Quaternion.Euler(0f, -twist, 0f);
-            Vector3 screenDirection = inverseRotation * worldDirection;
+            Vector3 screenOffset = inverseRotation * toTarget2D;
 
-            string directionText = GetArrowKeyDirection(screenDirection.x, screenDirection.z);
-
-            // Return concise format: "500 up-right" (similar to world map "500 northeast")
-            return String.Format("{0:F0} {1}", distance, directionText.ToLower().Replace(" ", "-"));
+            // screenOffset.x = left/right (negative = left, positive = right)
+            // screenOffset.z = up/down (negative = down, positive = up)
+            return String.Format("direct: {0}", FormatScreenOffset(screenOffset.z, screenOffset.x));
         }
 
         private string GetWaypointGuidance()
@@ -1728,24 +1674,21 @@ namespace Memoria.Accessibility
             Vector3 playerPos = _playerController.curPos;
             Vector3 toWaypoint = targetWaypoint - playerPos;
 
-            // Calculate horizontal (XZ) distance only
+            // Use horizontal (XZ) offset only
             Vector3 toWaypoint2D = new Vector3(toWaypoint.x, 0, toWaypoint.z);
             float horizontalDistance = toWaypoint2D.magnitude;
 
             if (horizontalDistance < 0.01f)
                 return "At waypoint";
 
-            Vector3 worldDirection = toWaypoint2D.normalized;
-
-            // Apply inverse twist to convert from world direction to screen direction
+            // Apply inverse twist to convert from world space to screen space
             float twist = FF9StateSystem.Field.twist.y;
             Quaternion inverseRotation = Quaternion.Euler(0f, -twist, 0f);
-            Vector3 screenDirection = inverseRotation * worldDirection;
+            Vector3 screenOffset = inverseRotation * toWaypoint2D;
 
-            string directionText = GetArrowKeyDirection(screenDirection.x, screenDirection.z);
-            string distanceText = GetDistanceDescription(horizontalDistance);
-
-            return String.Format("{0}, {1}", directionText, distanceText);
+            // screenOffset.x = left/right (negative = left, positive = right)
+            // screenOffset.z = up/down (negative = down, positive = up)
+            return FormatScreenOffset(screenOffset.z, screenOffset.x);
         }
 
         private void UpdateTrackedTarget()
