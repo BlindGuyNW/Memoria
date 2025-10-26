@@ -81,14 +81,29 @@ namespace Memoria.Accessibility
                 return;
             }
 
+            // Try to get control char, but fall back to first actor if control char isn't set
+            // This handles interactive events/minigames where the player exists but isn't marked as control char
             PosObj controlChar = eventEngine.GetControlChar();
+            bool usedFallback = false;
+
+            if (controlChar == null)
+            {
+                // In interactive events, the control UID might not be set, but the player actor still exists
+                // Use GetControlCharOrTheFirstActor which falls back to the first actor in the scene
+                controlChar = eventEngine.GetControlCharOrTheFirstActor();
+                usedFallback = true;
+            }
+
             if (controlChar != null && controlChar.go != null)
             {
                 _playerController = controlChar.go.GetComponent<FieldMapActorController>();
                 if (_playerController != null)
                 {
                     _hasInitialized = true;
-                    Log.Message("[AccessibleNavigation] Player controller found on attempt {0}!", _initAttempts);
+                    if (usedFallback)
+                        Log.Message("[AccessibleNavigation] Player controller found via fallback (interactive event) on attempt {0}!", _initAttempts);
+                    else
+                        Log.Message("[AccessibleNavigation] Player controller found on attempt {0}!", _initAttempts);
                     ScreenReaderManager.Instance.Speak("Navigation ready", false);
                     return;
                 }
@@ -96,7 +111,8 @@ namespace Memoria.Accessibility
 
             if (_initAttempts <= 3)
             {
-                Log.Message("[AccessibleNavigation] Attempt {0}: Control char is {1}", _initAttempts, controlChar != null ? "not null" : "null");
+                Log.Message("[AccessibleNavigation] Attempt {0}: Control char is {1}, fallback tried: {2}",
+                    _initAttempts, controlChar != null ? "not null" : "null", usedFallback);
             }
 
             // Stop trying after 300 attempts (about 10 seconds at 30fps)
@@ -1208,11 +1224,30 @@ namespace Memoria.Accessibility
                 return;
             }
 
-            if (_playerController == null)
+            // Get player controller with fallback for interactive events
+            FieldMapActorController playerController = _playerController;
+            if (playerController == null)
             {
+                EventEngine eventEngine = PersistenSingleton<EventEngine>.Instance;
+                if (eventEngine != null)
+                {
+                    PosObj controlChar = eventEngine.GetControlCharOrTheFirstActor();
+                    if (controlChar != null && controlChar.go != null)
+                    {
+                        playerController = controlChar.go.GetComponent<FieldMapActorController>();
+                    }
+                }
+            }
+
+            if (playerController == null)
+            {
+                Log.Warning("[AccessibleNavigation] Cannot find player controller for navigation");
                 ScreenReaderManager.Instance.Speak("Cannot navigate - player not found", false);
                 return;
             }
+
+            // Update the cached player controller so downstream methods can use it
+            _playerController = playerController;
 
             InteractiveObject selectedObj = _nearbyObjects[_currentSelection];
 
