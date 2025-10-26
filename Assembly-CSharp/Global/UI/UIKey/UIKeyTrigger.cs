@@ -939,12 +939,13 @@ public class UIKeyTrigger : MonoBehaviour
 
     private void HandleFieldAccessibilityHotkeys()
     {
-        // 'M' key (for Money) - Announce current gil (works in field, world, and pause)
+        // 'M' key (for Money) - Announce current gil (works in field, world, pause, and shops)
         // Only trigger without modifiers to avoid conflicts with Shift+Ctrl+M (Memoria menu)
         if (MKeyDown && !ControlKey && !ShiftKey && !AltKey &&
             (PersistenSingleton<UIManager>.Instance.State == UIManager.UIState.FieldHUD ||
              PersistenSingleton<UIManager>.Instance.State == UIManager.UIState.WorldHUD ||
-             PersistenSingleton<UIManager>.Instance.State == UIManager.UIState.Pause))
+             PersistenSingleton<UIManager>.Instance.State == UIManager.UIState.Pause ||
+             PersistenSingleton<UIManager>.Instance.State == UIManager.UIState.Shop))
         {
             UInt32 gil = FF9StateSystem.Common.FF9.party.gil;
             ScreenReaderManager.Instance.Speak($"Gil: {gil}", interrupt: false);
