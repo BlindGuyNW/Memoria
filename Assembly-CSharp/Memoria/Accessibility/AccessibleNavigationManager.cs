@@ -33,10 +33,11 @@ namespace Memoria.Accessibility
             public Vector3 position;
             public float distance;
             public int clockDirection; // 1-12 for clock positions
+            public string directionDescription; // Human-readable direction (e.g., "3 o'clock" or "pan left 500")
             public bool showsIcon; // Would this show an interaction icon?
             public bool isInInteractionRange; // Within ~100 units, can interact now
 
-            public InteractiveObject(Obj obj, string name, string type, Vector3 position, float distance, int clockDirection, bool showsIcon, bool isInInteractionRange)
+            public InteractiveObject(Obj obj, string name, string type, Vector3 position, float distance, int clockDirection, string directionDescription, bool showsIcon, bool isInInteractionRange)
             {
                 this.obj = obj;
                 this.name = name;
@@ -44,6 +45,7 @@ namespace Memoria.Accessibility
                 this.position = position;
                 this.distance = distance;
                 this.clockDirection = clockDirection;
+                this.directionDescription = directionDescription;
                 this.showsIcon = showsIcon;
                 this.isInInteractionRange = isInInteractionRange;
             }
@@ -381,9 +383,22 @@ namespace Memoria.Accessibility
                     // We sort by distance anyway, and FF9 fields aren't huge
 
                     // Test if we can reach this object
-                    // If it shows an icon, the game already validated it's reachable - trust that
-                    // Otherwise, test pathfinding
-                    bool canReach = wouldShowIcon || TestPathfinding(objPos);
+                    // Off walkmesh (activeTri = -1): skip pathfinding (telescope, free camera modes)
+                    // On walkmesh: use pathfinding or trust icons
+                    bool isOffWalkmesh = _playerController.activeTri == -1;
+                    bool canReach;
+
+                    if (isOffWalkmesh)
+                    {
+                        // Off walkmesh: all visible actors are reachable (telescope mode, etc.)
+                        canReach = true;
+                    }
+                    else
+                    {
+                        // Normal mode: use pathfinding or trust icons
+                        canReach = wouldShowIcon || TestPathfinding(objPos);
+                    }
+
                     if (!canReach)
                     {
                         Log.Message("[AccessibleNavigation]   -> SKIPPED: No path found (distance={0:F0})", distance);
@@ -393,8 +408,23 @@ namespace Memoria.Accessibility
                     // Check if within interaction range (< 100 units, can interact now)
                     bool inInteractionRange = distance < 100f;
 
-                    // Calculate clock direction
+                    // Calculate direction description
                     int clockDir = CalculateClockDirection(playerForward, toObject);
+                    string directionDesc;
+
+                    if (isOffWalkmesh)
+                    {
+                        // Off walkmesh: use screen-relative directions (pan left/right/up/down)
+                        Quaternion inverseRotation = Quaternion.Euler(0f, -twist, 0f);
+                        Vector3 screenOffset = inverseRotation * toObject2D;
+                        // screenOffset.x = left/right, screenOffset.z = up/down
+                        directionDesc = "pan " + FormatScreenOffset(screenOffset.z, screenOffset.x);
+                    }
+                    else
+                    {
+                        // Normal mode: use clock directions
+                        directionDesc = clockDir.ToString() + " o'clock";
+                    }
 
                     // Determine object type and name
                     string objType = GetObjectType(actor, eventEngine);
@@ -407,6 +437,7 @@ namespace Memoria.Accessibility
                         objPos,
                         distance,
                         clockDir,
+                        directionDesc,
                         wouldShowIcon,
                         inInteractionRange
                     );
@@ -465,9 +496,22 @@ namespace Memoria.Accessibility
                     // Include all interactive quads - no distance filtering
 
                     // Test if we can reach this zone
-                    // If it shows an icon, the game already validated it's reachable - trust that
-                    // Otherwise, test pathfinding
-                    bool canReach = wouldShowIcon || TestPathfinding(objPos);
+                    // Off walkmesh (activeTri = -1): skip pathfinding (telescope, free camera modes)
+                    // On walkmesh: use pathfinding or trust icons
+                    bool isOffWalkmesh = _playerController.activeTri == -1;
+                    bool canReach;
+
+                    if (isOffWalkmesh)
+                    {
+                        // Off walkmesh: all visible quads are reachable (telescope mode, etc.)
+                        canReach = true;
+                    }
+                    else
+                    {
+                        // Normal mode: use pathfinding or trust icons
+                        canReach = wouldShowIcon || TestPathfinding(objPos);
+                    }
+
                     if (!canReach)
                     {
                         Log.Message("[AccessibleNavigation]   -> SKIPPED: No path found (distance={0:F0})", distance);
@@ -477,8 +521,23 @@ namespace Memoria.Accessibility
                     // Check if within interaction range (< 100 units, can interact now)
                     bool inInteractionRange = distance < 100f;
 
-                    // Calculate clock direction
+                    // Calculate direction description
                     int clockDir = CalculateClockDirection(playerForward, toObject);
+                    string directionDesc;
+
+                    if (isOffWalkmesh)
+                    {
+                        // Off walkmesh: use screen-relative directions (pan left/right/up/down)
+                        Quaternion inverseRotation = Quaternion.Euler(0f, -twist, 0f);
+                        Vector3 screenOffset = inverseRotation * toObject2D;
+                        // screenOffset.x = left/right, screenOffset.z = up/down
+                        directionDesc = "pan " + FormatScreenOffset(screenOffset.z, screenOffset.x);
+                    }
+                    else
+                    {
+                        // Normal mode: use clock directions
+                        directionDesc = clockDir.ToString() + " o'clock";
+                    }
 
                     // Determine name and type
                     string quadName = null;
@@ -545,6 +604,7 @@ namespace Memoria.Accessibility
                         objPos,
                         distance,
                         clockDir,
+                        directionDesc,
                         wouldShowIcon,
                         inInteractionRange
                     );
@@ -922,8 +982,9 @@ namespace Memoria.Accessibility
             InteractiveObject obj = _nearbyObjects[_currentSelection];
             string distanceDesc = GetDistanceDescription(obj.distance);
 
-            // Format: "1 of 5: Puck, NPC, 3 o'clock, very close"
-            string announcement = $"{_currentSelection + 1} of {_nearbyObjects.Count}: {obj.name}, {obj.type}, {obj.clockDirection} o'clock, {distanceDesc}";
+            // Format: "1 of 5: Puck, NPC, 3 o'clock, very close" (normal)
+            // Format: "1 of 5: Object 4, Object, pan left 500 up 200, very far" (telescope)
+            string announcement = $"{_currentSelection + 1} of {_nearbyObjects.Count}: {obj.name}, {obj.type}, {obj.directionDescription}, {distanceDesc}";
             Log.Message("[AccessibleNavigation]   Announcing: {0}", announcement);
             ScreenReaderManager.Instance.Speak(announcement, true);
         }
