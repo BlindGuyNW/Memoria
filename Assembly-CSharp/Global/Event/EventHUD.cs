@@ -1,6 +1,7 @@
 ﻿using System;
 using Assets.Sources.Scripts.UI.Common;
 using Memoria.Assets;
+using Memoria.Accessibility;
 
 public class EventHUD
 {
@@ -281,6 +282,21 @@ public class EventHUD
             EventHUD.CurrentHUD = HUDType;
             UIManager.Field.DisplaySpecialHUD(HUDType);
             PersistenSingleton<UIManager>.Instance.SetPlayerControlEnable(HUDType == MinigameHUD.Telescope || HUDType == MinigameHUD.ChocoHot || PersistenSingleton<EventEngine>.Instance.GetUserControl(), null);
+
+            // Initialize accessibility for cage minigame
+            if (HUDType == MinigameHUD.SwingACage)
+            {
+                if (CageMinigameAccessibility.Instance != null)
+                {
+                    // Only initialize if the minigame is actually running (position < 55000)
+                    // This prevents infinite init/shutdown loops when the event script has already finished
+                    int position = EventVariableMonitor.GetGlobalInt24(34);
+                    if (position < 55000)
+                    {
+                        CageMinigameAccessibility.Instance.Initialize();
+                    }
+                }
+            }
         }
         else if (!FF9StateSystem.MobilePlatform)
         {
@@ -329,6 +345,13 @@ public class EventHUD
         }
         if (closeHUD)
         {
+            // Shutdown accessibility for cage minigame
+            if (HUDType == MinigameHUD.SwingACage)
+            {
+                if (CageMinigameAccessibility.Instance != null)
+                    CageMinigameAccessibility.Instance.Shutdown();
+            }
+
             EventHUD.CurrentHUD = MinigameHUD.None;
             UIManager.Field.DestroySpecialHUD();
             PersistenSingleton<UIManager>.Instance.SetPlayerControlEnable(HUDType != MinigameHUD.Telescope && HUDType != MinigameHUD.ChocoHot && PersistenSingleton<EventEngine>.Instance.GetUserControl(), null);
@@ -361,9 +384,17 @@ public class EventHUD
                 if (genFieldEntrance != 0)
                 {
                     if (globDialogProgression == 13)
+                    {
                         EventHUD.OpenSpecialHUD(MinigameHUD.SwingACage);
+
+                        // Update cage minigame accessibility
+                        if (CageMinigameAccessibility.Instance != null)
+                            CageMinigameAccessibility.Instance.Update();
+                    }
                     else
+                    {
                         EventHUD.CloseSpecialHUD(MinigameHUD.SwingACage);
+                    }
                 }
             }
             else if (fldMapNo == 1704) // Mdn. Sari/Eidolon Wall
